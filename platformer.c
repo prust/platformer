@@ -34,6 +34,10 @@ bool in_bounds(int x, int y);
 int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
+
+int sign(int n);
+bool collides_w_wall(int player_x, int player_y, byte grid_flags[]);
+
 void error(char* activity);
 
 // game globals
@@ -44,6 +48,22 @@ int block_h = 30;
 const int num_blocks_w = 128; // 2^7
 const int num_blocks_h = 128; // 2^7
 const int grid_len = num_blocks_w * num_blocks_h;
+
+// adapted from https://www.reddit.com/r/gamemaker/comments/37y24e/perfect_platformer_code/
+float grav = 0.2;
+float dx = 0;
+float dy = 0;
+int jump_speed = 4;
+int move_speed = 2;
+
+int player_x = 0;
+int player_y = 0;
+int player_w = 10;
+int player_h = 10;
+
+bool left_pressed = false;
+bool right_pressed = false;
+bool up_pressed = false;
 
 int main(int num_args, char* args[]) {
   byte grid_flags[grid_len];
@@ -79,6 +99,11 @@ int main(int num_args, char* args[]) {
   for (int i = 0; i < grid_len; ++i)
     grid_flags[i] = 0;
 
+  // create a 'floor' of blocks along the bottom
+  int y = vp.h / block_h - 1;
+  for (int x = 0; x < num_blocks_w; ++x)
+    grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
+
   SDL_Event evt;
   bool exit_game = false;
   bool is_paused = false;
@@ -90,7 +115,15 @@ int main(int num_args, char* args[]) {
   bool mouse_is_down = false;
 
   while (!exit_game) {
+    left_pressed = false;
+    right_pressed = false;
+    up_pressed = false;
     bool was_paused = is_paused;
+
+    // we have to handle arrow keys via getKeyboardState() in order to support multiple keys at a time
+    // SDL_KEYDOWN events only allow one key at a time
+    const uint8_t *key_state = SDL_GetKeyboardState(NULL);
+    
     while (SDL_PollEvent(&evt)) {
       int x, y;
       switch(evt.type) {
@@ -145,16 +178,25 @@ int main(int num_args, char* args[]) {
           if (evt.key.keysym.sym == SDLK_ESCAPE)
             exit_game = true;
           else if (evt.key.keysym.sym == SDLK_SPACE)
-            is_paused = true;
+            is_paused = !is_paused;
+
+          // gravity-switching
+          // not working yet -- reverse gravity prevents left/right movement
+          // i think due to the platforming code
+          // also, the "jump" mechanic needs to reversed when in reverse gravity
+
+          // else if (evt.key.keysym.sym == SDLK_g)
+          //   grav = -grav;
           break;
       }
-
-
-      // else if (evt.type == SDL_MOUSEBUTTONDOWN && is_mouseover(&start_game_img, evt.button.x, evt.button.y)) {
-      //   SDL_SetCursor(arrow_cursor);
-      //   play_level(window, renderer);
-      // }
     }
+
+    if (key_state[SDL_SCANCODE_LEFT])
+      left_pressed = true;
+    if (key_state[SDL_SCANCODE_RIGHT])
+      right_pressed = true;
+    if (key_state[SDL_SCANCODE_UP])
+      up_pressed = true;
 
     // handle pause state
     if (was_paused || is_paused) {
@@ -182,6 +224,42 @@ int main(int num_args, char* args[]) {
     unsigned int curr_time = SDL_GetTicks();
     double dt = (curr_time - last_loop_time) / 1000.0; // dt should always be in seconds
 
+
+    // left/right movement
+    if (left_pressed)
+      dx = -move_speed;
+    else if (right_pressed)
+      dx = move_speed;
+    else
+      dx = 0;
+    
+    // gravity
+    if (dy < 10)
+      dy += grav;
+
+    // if touching ground, & jump button pressed, jump
+    if (up_pressed && collides_w_wall(player_x, player_y + 1, grid_flags))
+      dy = -jump_speed;
+
+    // if it's going to collide (horiz), inch there 1px at a time
+    if (collides_w_wall(player_x + dx, player_y, grid_flags) && dx) {
+      while (!collides_w_wall(player_x + sign(dx), player_y, grid_flags))
+        player_x += sign(dx);
+      
+      dx = 0;
+    }
+    player_x += dx;
+
+    // if it's going to collid (vert), inch there 1px at a time
+    if (collides_w_wall(player_x, player_y + dy, grid_flags) && dy) {
+      while (!collides_w_wall(player_x, player_y + sign(dy), grid_flags))
+        player_y += sign(dy);
+      
+      dy = 0;
+    }
+    player_y += dy;
+
+
     // set BG color
     if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
       error("setting bg color");
@@ -207,6 +285,19 @@ int main(int num_args, char* args[]) {
           error("filling wall rect");
       }
     }
+
+    // render player
+    if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
+      error("setting player color");
+
+    SDL_Rect player_rect = {
+      .x = player_x - vp.x,
+      .y = player_y - vp.y,
+      .w = player_w,
+      .h = player_h
+    };
+    if (SDL_RenderFillRect(renderer, &player_rect) < 0)
+      error("filling player rect");
 
     SDL_RenderPresent(renderer);
     SDL_Delay(10);
@@ -273,8 +364,37 @@ int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, 
   return i * size * 8;
 }
 
+bool collides_w_wall(int player_x, int player_y, byte grid_flags[]) {
+  int player_x2 = player_x + player_w;
+  int player_y2 = player_y + player_h;
+
+  for (int i = 0; i < grid_len; ++i) {
+    if (grid_flags[i] & WALL) {
+      int x = to_x(i) * block_w;
+      int y = to_y(i) * block_h;
+      int x2 = x + block_w;
+      int y2 = y + block_h;
+
+      // DO collide if
+      if (player_x2 > x && player_x < x2 &&
+        player_y2 > y && player_y < y2)
+          return true;
+    }
+  }
+  return false;
+}
+
 void error(char* activity) {
   printf("%s failed: %s\n", activity, SDL_GetError());
   SDL_Quit();
   exit(-1);
+}
+
+int sign(int n) {
+  if (n > 0)
+    return 1;
+  else if (n < 0)
+    return -1;
+  else
+    return 0;
 }
