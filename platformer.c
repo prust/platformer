@@ -5,10 +5,10 @@
 #include <math.h>
 #include <limits.h>
 
-#include "SDL.h"
-#include "SDL_image.h"
-#include "SDL_mixer.h"
-#include "font8x8_basic.h"
+#include "include/SDL.h"
+#include "include/SDL_image.h"
+#include "include/SDL_mixer.h"
+#include "include/font8x8_basic.h"
 
 typedef unsigned char byte;
 
