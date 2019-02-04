@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <limits.h>
+#include <errno.h>
 
 #include "SDL.h"
 // #include "SDL_image.h"
@@ -13,7 +14,10 @@
 typedef unsigned char byte;
 
 // grid flags
-#define WALL 0x1
+#define WALL 0x01
+#define REVERSE_GRAV 0x02
+#define LAVA 0x04
+#define FINISH 0x08
 
 typedef struct {
   byte flags;
@@ -35,8 +39,9 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 
-int sign(int n);
-bool collides_w_wall(int player_x, int player_y, byte grid_flags[]);
+int sign(float n);
+bool collides(int player_x, int player_y, byte grid_flags[], byte type);
+int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
 
 void error(char* activity);
 
@@ -48,6 +53,8 @@ int block_h = 30;
 const int num_blocks_w = 128; // 2^7
 const int num_blocks_h = 128; // 2^7
 const int grid_len = num_blocks_w * num_blocks_h;
+
+FILE *level_file;
 
 // adapted from https://www.reddit.com/r/gamemaker/comments/37y24e/perfect_platformer_code/
 float grav = 0.2;
@@ -64,6 +71,7 @@ int player_h = 10;
 bool left_pressed = false;
 bool right_pressed = false;
 bool up_pressed = false;
+bool down_pressed = false;
 
 int main(int num_args, char* args[]) {
   byte grid_flags[grid_len];
@@ -88,21 +96,32 @@ int main(int num_args, char* args[]) {
   SDL_GetWindowSize(window, &vp.w, &vp.h);
   //vp.h -= header_height;
 
+  level_file = fopen("first.level1", "rb"); // read binary
+
+  if (level_file != NULL) {
+    int num_bytes_read = fread(grid_flags, grid_len, 1, level_file); // read bytes to our buffer
+    if (ferror(level_file))
+      printf("reading level file: %s\n", strerror(errno));
+
+    fclose(level_file);
+  }
+  else {
+    // have to manually init b/c C doesn't allow initializing VLAs w/ {0}
+    for (int i = 0; i < grid_len; ++i)
+      grid_flags[i] = 0;
+
+    // create a 'floor' of blocks along the bottom
+    int y = vp.h / block_h - 1;
+    for (int x = 0; x < num_blocks_w; ++x)
+      grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
+  }
+
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
   if (!renderer)
     error("creating renderer");
 
   if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
     error("setting blend mode");
-
-  // have to manually init b/c C doesn't allow initializing VLAs w/ {0}
-  for (int i = 0; i < grid_len; ++i)
-    grid_flags[i] = 0;
-
-  // create a 'floor' of blocks along the bottom
-  int y = vp.h / block_h - 1;
-  for (int x = 0; x < num_blocks_w; ++x)
-    grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
 
   SDL_Event evt;
   bool exit_game = false;
@@ -112,12 +131,15 @@ int main(int num_args, char* args[]) {
   unsigned int pause_start = 0;
 
   bool mode_destroy = false;
+  byte mode_type = WALL;
   bool mouse_is_down = false;
+  bool won_game = false;
 
   while (!exit_game) {
     left_pressed = false;
     right_pressed = false;
     up_pressed = false;
+    down_pressed = false;
     bool was_paused = is_paused;
 
     // we have to handle arrow keys via getKeyboardState() in order to support multiple keys at a time
@@ -125,6 +147,14 @@ int main(int num_args, char* args[]) {
     const uint8_t *key_state = SDL_GetKeyboardState(NULL);
     
     while (SDL_PollEvent(&evt)) {
+      // this is above the input section b/c it's a pause condition & the pause short-circuits
+      // you win if you hit a Finish square
+      if (won_game) {
+        is_paused = true;
+        render_text(renderer, "You Won!", vp.w / 2 - 100, vp.h / 2, 4);
+        SDL_RenderPresent(renderer);
+      }
+
       int x, y;
       switch(evt.type) {
         case SDL_QUIT:
@@ -148,13 +178,13 @@ int main(int num_args, char* args[]) {
           y = (evt.button.y + vp.y) / block_h;
 
           if (in_bounds(x, y)) {
-            if (grid_flags[to_pos(x, y)] & WALL) {
+            if (grid_flags[to_pos(x, y)]) {
               mode_destroy = true;
-              grid_flags[to_pos(x, y)] &= (~WALL); // clear WALL bit
+              grid_flags[to_pos(x, y)] = 0; // clear all bits
             }
             else {
               mode_destroy = false;
-              grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
+              grid_flags[to_pos(x, y)] = WALL | mode_type; // set appropriate bit
             }            
           }
           break;
@@ -165,28 +195,50 @@ int main(int num_args, char* args[]) {
             y = (evt.button.y + vp.y) / block_h;
             if (in_bounds(x, y)) {
               if (mode_destroy) {
-                grid_flags[to_pos(x, y)] &= (~WALL); // clear WALL bit
+                grid_flags[to_pos(x, y)] = 0; // clear all bits
               }
               else {
-                grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
+                grid_flags[to_pos(x, y)] = WALL | mode_type; // set appropriate bit
               }
             }
           }
           break;
 
         case SDL_KEYDOWN:
-          if (evt.key.keysym.sym == SDLK_ESCAPE)
+          if (evt.key.keysym.sym == SDLK_ESCAPE) {
             exit_game = true;
-          else if (evt.key.keysym.sym == SDLK_SPACE)
+          }
+          else if (evt.key.keysym.sym == SDLK_SPACE) {
             is_paused = !is_paused;
+          }
+          else if (evt.key.keysym.sym == SDLK_s) {
+            level_file = fopen("first.level1", "wb"); // read binary
 
+            if (level_file) {
+              int num_bytes_written = fwrite(grid_flags, grid_len, 1, level_file); // write bytes to file
+              if (ferror(level_file))
+                error("writing level file");
+              
+              fclose(level_file);
+            }
+          }
           // gravity-switching
           // not working yet -- reverse gravity prevents left/right movement
           // i think due to the platforming code
           // also, the "jump" mechanic needs to reversed when in reverse gravity
 
-          // else if (evt.key.keysym.sym == SDLK_g)
-          //   grav = -grav;
+          else if (evt.key.keysym.sym == SDLK_g) {
+            mode_type = REVERSE_GRAV;
+          }
+          else if (evt.key.keysym.sym == SDLK_w) {
+            mode_type = WALL;
+          }
+          else if (evt.key.keysym.sym == SDLK_l) {
+            mode_type = LAVA;
+          }
+          else if (evt.key.keysym.sym == SDLK_f) {
+            mode_type = FINISH;
+          }
           break;
       }
     }
@@ -197,6 +249,8 @@ int main(int num_args, char* args[]) {
       right_pressed = true;
     if (key_state[SDL_SCANCODE_UP])
       up_pressed = true;
+    if (key_state[SDL_SCANCODE_DOWN])
+      down_pressed = true;
 
     // handle pause state
     if (was_paused || is_paused) {
@@ -234,16 +288,34 @@ int main(int num_args, char* args[]) {
       dx = 0;
     
     // gravity
-    if (dy < 10)
+    if ((grav > 0 && dy < 10) || (grav < 0 && dy > -10))
       dy += grav;
 
+    if (collides(player_x + dx, player_y + dy, grid_flags, REVERSE_GRAV))
+      grav = -grav;
+
+    if (collides(player_x + dx, player_y + dy, grid_flags, FINISH))
+      won_game = true;
+
+    // start over if you hit lava or fall offscreen
+    if (collides(player_x + dx, player_y + dy, grid_flags, LAVA) ||
+      player_x < 0 || player_x > vp.w || player_y < 0 || player_y > vp.h) {
+      grav = 0.2;
+      dx = 0;
+      dy = 0;
+      player_x = 0;
+      player_y = 0;
+    }
+
     // if touching ground, & jump button pressed, jump
-    if (up_pressed && collides_w_wall(player_x, player_y + 1, grid_flags))
+    if (up_pressed && collides(player_x, player_y + 1, grid_flags, WALL))
       dy = -jump_speed;
+    else if (down_pressed && collides(player_x, player_y - 1, grid_flags, WALL))
+      dy = jump_speed;
 
     // if it's going to collide (horiz), inch there 1px at a time
-    if (collides_w_wall(player_x + dx, player_y, grid_flags) && dx) {
-      while (!collides_w_wall(player_x + sign(dx), player_y, grid_flags))
+    if (collides(player_x + dx, player_y, grid_flags, WALL) && dx) {
+      while (!collides(player_x + sign(dx), player_y, grid_flags, WALL))
         player_x += sign(dx);
       
       dx = 0;
@@ -251,8 +323,8 @@ int main(int num_args, char* args[]) {
     player_x += dx;
 
     // if it's going to collid (vert), inch there 1px at a time
-    if (collides_w_wall(player_x, player_y + dy, grid_flags) && dy) {
-      while (!collides_w_wall(player_x, player_y + sign(dy), grid_flags))
+    if (collides(player_x, player_y + dy, grid_flags, WALL) && dy) {
+      while (!collides(player_x, player_y + sign(dy), grid_flags, WALL))
         player_y += sign(dy);
       
       dy = 0;
@@ -267,20 +339,35 @@ int main(int num_args, char* args[]) {
       error("clearing renderer");
 
     // render grid
-    if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
-      error("setting land color");
 
     for (int i = 0; i < grid_len; ++i) {
       int x = to_x(i);
       int y = to_y(i);
 
-      if (grid_flags[i] & WALL) {
+      if (grid_flags[i]) {
         SDL_Rect wall_rect = {
           .x = x * block_w - vp.x,
           .y = y * block_h - vp.y,
           .w = block_w,
           .h = block_h
         };
+        if (grid_flags[i] & REVERSE_GRAV) {
+          if (SDL_SetRenderDrawColor(renderer, 40, 114, 35, 255) < 0)
+            error("setting grav color");
+        }
+        else if (grid_flags[i] & LAVA) {
+          if (SDL_SetRenderDrawColor(renderer, 194, 37, 37, 255) < 0)
+            error("setting LAVA color");
+        }
+        else if (grid_flags[i] & FINISH) {
+          if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
+            error("setting finish color");
+        }
+        else if (grid_flags[i] & WALL) {
+          if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
+            error("setting wall color");
+        }
+
         if (SDL_RenderFillRect(renderer, &wall_rect) < 0)
           error("filling wall rect");
       }
@@ -364,12 +451,12 @@ int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, 
   return i * size * 8;
 }
 
-bool collides_w_wall(int player_x, int player_y, byte grid_flags[]) {
+bool collides(int player_x, int player_y, byte grid_flags[], byte type) {
   int player_x2 = player_x + player_w;
   int player_y2 = player_y + player_h;
 
   for (int i = 0; i < grid_len; ++i) {
-    if (grid_flags[i] & WALL) {
+    if (grid_flags[i] & type) {
       int x = to_x(i) * block_w;
       int y = to_y(i) * block_h;
       int x2 = x + block_w;
@@ -385,12 +472,12 @@ bool collides_w_wall(int player_x, int player_y, byte grid_flags[]) {
 }
 
 void error(char* activity) {
-  printf("%s failed: %s\n", activity, SDL_GetError());
+  printf("%s failed: %s\n", activity, strerror(errno));//SDL_GetError());
   SDL_Quit();
   exit(-1);
 }
 
-int sign(int n) {
+int sign(float n) {
   if (n > 0)
     return 1;
   else if (n < 0)
