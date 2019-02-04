@@ -36,7 +36,7 @@ int to_x(int ix);
 int to_y(int ix);
 int to_pos(int x, int y);
 
-int sign(int n);
+int sign(float n);
 bool collides_w_wall(int player_x, int player_y, byte grid_flags[]);
 
 void error(char* activity);
@@ -67,6 +67,7 @@ int player_h = 10;
 bool left_pressed = false;
 bool right_pressed = false;
 bool up_pressed = false;
+bool down_pressed = false;
 
 int main(int num_args, char* args[]) {
   byte grid_flags[grid_len];
@@ -132,6 +133,7 @@ int main(int num_args, char* args[]) {
     left_pressed = false;
     right_pressed = false;
     up_pressed = false;
+    down_pressed = false;
     bool was_paused = is_paused;
 
     // we have to handle arrow keys via getKeyboardState() in order to support multiple keys at a time
@@ -211,8 +213,9 @@ int main(int num_args, char* args[]) {
           // i think due to the platforming code
           // also, the "jump" mechanic needs to reversed when in reverse gravity
 
-          // else if (evt.key.keysym.sym == SDLK_g)
-          //   grav = -grav;
+          else if (evt.key.keysym.sym == SDLK_g) {
+            grav = -grav;
+          }
           break;
       }
     }
@@ -223,6 +226,8 @@ int main(int num_args, char* args[]) {
       right_pressed = true;
     if (key_state[SDL_SCANCODE_UP])
       up_pressed = true;
+    if (key_state[SDL_SCANCODE_DOWN])
+      down_pressed = true;
 
     // handle pause state
     if (was_paused || is_paused) {
@@ -260,12 +265,14 @@ int main(int num_args, char* args[]) {
       dx = 0;
     
     // gravity
-    if (dy < 10)
+    if ((grav > 0 && dy < 10) || (grav < 0 && dy > -10))
       dy += grav;
 
     // if touching ground, & jump button pressed, jump
     if (up_pressed && collides_w_wall(player_x, player_y + 1, grid_flags))
       dy = -jump_speed;
+    else if (down_pressed && collides_w_wall(player_x, player_y - 1, grid_flags))
+      dy = jump_speed;
 
     // if it's going to collide (horiz), inch there 1px at a time
     if (collides_w_wall(player_x + dx, player_y, grid_flags) && dx) {
@@ -416,7 +423,7 @@ void error(char* activity) {
   exit(-1);
 }
 
-int sign(int n) {
+int sign(float n) {
   if (n > 0)
     return 1;
   else if (n < 0)
