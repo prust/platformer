@@ -16,7 +16,7 @@ typedef unsigned char byte;
 // grid flags
 #define WALL 0x01
 #define REVERSE_GRAV 0x02
-#define SPIKE 0x04
+#define LAVA 0x04
 #define FINISH 0x08
 
 typedef struct {
@@ -41,6 +41,7 @@ int to_pos(int x, int y);
 
 int sign(float n);
 bool collides(int player_x, int player_y, byte grid_flags[], byte type);
+int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
 
 void error(char* activity);
 
@@ -132,6 +133,7 @@ int main(int num_args, char* args[]) {
   bool mode_destroy = false;
   byte mode_type = WALL;
   bool mouse_is_down = false;
+  bool won_game = false;
 
   while (!exit_game) {
     left_pressed = false;
@@ -145,6 +147,14 @@ int main(int num_args, char* args[]) {
     const uint8_t *key_state = SDL_GetKeyboardState(NULL);
     
     while (SDL_PollEvent(&evt)) {
+      // this is above the input section b/c it's a pause condition & the pause short-circuits
+      // you win if you hit a Finish square
+      if (won_game) {
+        is_paused = true;
+        render_text(renderer, "You Won!", vp.w / 2 - 100, vp.h / 2, 4);
+        SDL_RenderPresent(renderer);
+      }
+
       int x, y;
       switch(evt.type) {
         case SDL_QUIT:
@@ -223,6 +233,12 @@ int main(int num_args, char* args[]) {
           else if (evt.key.keysym.sym == SDLK_w) {
             mode_type = WALL;
           }
+          else if (evt.key.keysym.sym == SDLK_l) {
+            mode_type = LAVA;
+          }
+          else if (evt.key.keysym.sym == SDLK_f) {
+            mode_type = FINISH;
+          }
           break;
       }
     }
@@ -278,6 +294,19 @@ int main(int num_args, char* args[]) {
     if (collides(player_x + dx, player_y + dy, grid_flags, REVERSE_GRAV))
       grav = -grav;
 
+    if (collides(player_x + dx, player_y + dy, grid_flags, FINISH))
+      won_game = true;
+
+    // start over if you hit lava or fall offscreen
+    if (collides(player_x + dx, player_y + dy, grid_flags, LAVA) ||
+      player_x < 0 || player_x > vp.w || player_y < 0 || player_y > vp.h) {
+      grav = 0.2;
+      dx = 0;
+      dy = 0;
+      player_x = 0;
+      player_y = 0;
+    }
+
     // if touching ground, & jump button pressed, jump
     if (up_pressed && collides(player_x, player_y + 1, grid_flags, WALL))
       dy = -jump_speed;
@@ -302,14 +331,6 @@ int main(int num_args, char* args[]) {
     }
     player_y += dy;
 
-    // player fell offscreen; start over
-    if (player_x < 0 || player_x > vp.w || player_y < 0 || player_y > vp.h) {
-      grav = 0.2;
-      dx = 0;
-      dy = 0;
-      player_x = 0;
-      player_y = 0;
-    }
 
     // set BG color
     if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
@@ -333,6 +354,14 @@ int main(int num_args, char* args[]) {
         if (grid_flags[i] & REVERSE_GRAV) {
           if (SDL_SetRenderDrawColor(renderer, 40, 114, 35, 255) < 0)
             error("setting grav color");
+        }
+        else if (grid_flags[i] & LAVA) {
+          if (SDL_SetRenderDrawColor(renderer, 194, 37, 37, 255) < 0)
+            error("setting LAVA color");
+        }
+        else if (grid_flags[i] & FINISH) {
+          if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
+            error("setting finish color");
         }
         else if (grid_flags[i] & WALL) {
           if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
