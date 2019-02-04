@@ -148,9 +148,15 @@ int main(int num_args, char* args[]) {
   bool mouse_is_down = false;
   bool won_game = false;
 
+  left_pressed = false;
+  right_pressed = false;
+
   while (!exit_game) {
-    left_pressed = false;
-    right_pressed = false;
+    // reset left/right every time when not using a controller
+    if (controller == NULL) {
+      left_pressed = false;
+      right_pressed = false;
+    }
     up_pressed = false;
     down_pressed = false;
     bool was_paused = is_paused;
@@ -257,16 +263,24 @@ int main(int num_args, char* args[]) {
         case SDL_JOYAXISMOTION:
           // X axis
           if (evt.jaxis.axis == 0) {
-            if (evt.jaxis.value < -JOYSTICK_DEAD_ZONE)
+            if (evt.jaxis.value < -JOYSTICK_DEAD_ZONE) {
               left_pressed = true;
-            else if (evt.jaxis.value > JOYSTICK_DEAD_ZONE)
+            }
+            else if (evt.jaxis.value > JOYSTICK_DEAD_ZONE) {
               right_pressed = true;
+            }
+            else {
+              right_pressed = false;
+              left_pressed = false;
+            }
           }
-          // Y axis
-          else {
-            if (evt.jaxis.value < -JOYSTICK_DEAD_ZONE)
+          break;
+
+        case SDL_CONTROLLERBUTTONDOWN:
+          if (evt.cbutton.button == SDL_CONTROLLER_BUTTON_A) {
+            if (grav > 0)
               up_pressed = true;
-            else if (evt.jaxis.value > JOYSTICK_DEAD_ZONE)
+            else if (grav < 0)
               down_pressed = true;
           }
           break;
