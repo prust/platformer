@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <limits.h>
+#include <errno.h>
 
 #include "include/SDL.h"
 #include "include/SDL_image.h"
@@ -49,6 +50,8 @@ const int num_blocks_w = 128; // 2^7
 const int num_blocks_h = 128; // 2^7
 const int grid_len = num_blocks_w * num_blocks_h;
 
+FILE *level_file;
+
 // adapted from https://www.reddit.com/r/gamemaker/comments/37y24e/perfect_platformer_code/
 float grav = 0.2;
 float dx = 0;
@@ -88,21 +91,32 @@ int main(int num_args, char* args[]) {
   SDL_GetWindowSize(window, &vp.w, &vp.h);
   //vp.h -= header_height;
 
+  level_file = fopen("first.level1", "rb"); // read binary
+
+  if (level_file != NULL) {
+    int num_bytes_read = fread(grid_flags, grid_len, 1, level_file); // read bytes to our buffer
+    if (ferror(level_file))
+      printf("reading level file: %s\n", strerror(errno));
+
+    fclose(level_file);
+  }
+  else {
+    // have to manually init b/c C doesn't allow initializing VLAs w/ {0}
+    for (int i = 0; i < grid_len; ++i)
+      grid_flags[i] = 0;
+
+    // create a 'floor' of blocks along the bottom
+    int y = vp.h / block_h - 1;
+    for (int x = 0; x < num_blocks_w; ++x)
+      grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
+  }
+
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
   if (!renderer)
     error("creating renderer");
 
   if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
     error("setting blend mode");
-
-  // have to manually init b/c C doesn't allow initializing VLAs w/ {0}
-  for (int i = 0; i < grid_len; ++i)
-    grid_flags[i] = 0;
-
-  // create a 'floor' of blocks along the bottom
-  int y = vp.h / block_h - 1;
-  for (int x = 0; x < num_blocks_w; ++x)
-    grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
 
   SDL_Event evt;
   bool exit_game = false;
@@ -175,11 +189,23 @@ int main(int num_args, char* args[]) {
           break;
 
         case SDL_KEYDOWN:
-          if (evt.key.keysym.sym == SDLK_ESCAPE)
+          if (evt.key.keysym.sym == SDLK_ESCAPE) {
             exit_game = true;
-          else if (evt.key.keysym.sym == SDLK_SPACE)
+          }
+          else if (evt.key.keysym.sym == SDLK_SPACE) {
             is_paused = !is_paused;
+          }
+          else if (evt.key.keysym.sym == SDLK_s) {
+            level_file = fopen("first.level1", "wb"); // read binary
 
+            if (level_file) {
+              int num_bytes_written = fwrite(grid_flags, grid_len, 1, level_file); // write bytes to file
+              if (ferror(level_file))
+                error("writing level file");
+              
+              fclose(level_file);
+            }
+          }
           // gravity-switching
           // not working yet -- reverse gravity prevents left/right movement
           // i think due to the platforming code
@@ -385,7 +411,7 @@ bool collides_w_wall(int player_x, int player_y, byte grid_flags[]) {
 }
 
 void error(char* activity) {
-  printf("%s failed: %s\n", activity, SDL_GetError());
+  printf("%s failed: %s\n", activity, strerror(errno));//SDL_GetError());
   SDL_Quit();
   exit(-1);
 }
