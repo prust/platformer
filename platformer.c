@@ -14,7 +14,10 @@
 typedef unsigned char byte;
 
 // grid flags
-#define WALL 0x1
+#define WALL 0x01
+#define REVERSE_GRAV 0x02
+#define SPIKE 0x04
+#define FINISH 0x08
 
 typedef struct {
   byte flags;
@@ -37,7 +40,7 @@ int to_y(int ix);
 int to_pos(int x, int y);
 
 int sign(float n);
-bool collides_w_wall(int player_x, int player_y, byte grid_flags[]);
+bool collides(int player_x, int player_y, byte grid_flags[], byte type);
 
 void error(char* activity);
 
@@ -127,6 +130,7 @@ int main(int num_args, char* args[]) {
   unsigned int pause_start = 0;
 
   bool mode_destroy = false;
+  byte mode_type = WALL;
   bool mouse_is_down = false;
 
   while (!exit_game) {
@@ -164,13 +168,13 @@ int main(int num_args, char* args[]) {
           y = (evt.button.y + vp.y) / block_h;
 
           if (in_bounds(x, y)) {
-            if (grid_flags[to_pos(x, y)] & WALL) {
+            if (grid_flags[to_pos(x, y)]) {
               mode_destroy = true;
-              grid_flags[to_pos(x, y)] &= (~WALL); // clear WALL bit
+              grid_flags[to_pos(x, y)] = 0; // clear all bits
             }
             else {
               mode_destroy = false;
-              grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
+              grid_flags[to_pos(x, y)] = WALL | mode_type; // set appropriate bit
             }            
           }
           break;
@@ -181,10 +185,10 @@ int main(int num_args, char* args[]) {
             y = (evt.button.y + vp.y) / block_h;
             if (in_bounds(x, y)) {
               if (mode_destroy) {
-                grid_flags[to_pos(x, y)] &= (~WALL); // clear WALL bit
+                grid_flags[to_pos(x, y)] = 0; // clear all bits
               }
               else {
-                grid_flags[to_pos(x, y)] |= WALL; // set WALL bit
+                grid_flags[to_pos(x, y)] = WALL | mode_type; // set appropriate bit
               }
             }
           }
@@ -214,7 +218,10 @@ int main(int num_args, char* args[]) {
           // also, the "jump" mechanic needs to reversed when in reverse gravity
 
           else if (evt.key.keysym.sym == SDLK_g) {
-            grav = -grav;
+            mode_type = REVERSE_GRAV;
+          }
+          else if (evt.key.keysym.sym == SDLK_w) {
+            mode_type = WALL;
           }
           break;
       }
@@ -268,15 +275,18 @@ int main(int num_args, char* args[]) {
     if ((grav > 0 && dy < 10) || (grav < 0 && dy > -10))
       dy += grav;
 
+    if (collides(player_x + dx, player_y + dy, grid_flags, REVERSE_GRAV))
+      grav = -grav;
+
     // if touching ground, & jump button pressed, jump
-    if (up_pressed && collides_w_wall(player_x, player_y + 1, grid_flags))
+    if (up_pressed && collides(player_x, player_y + 1, grid_flags, WALL))
       dy = -jump_speed;
-    else if (down_pressed && collides_w_wall(player_x, player_y - 1, grid_flags))
+    else if (down_pressed && collides(player_x, player_y - 1, grid_flags, WALL))
       dy = jump_speed;
 
     // if it's going to collide (horiz), inch there 1px at a time
-    if (collides_w_wall(player_x + dx, player_y, grid_flags) && dx) {
-      while (!collides_w_wall(player_x + sign(dx), player_y, grid_flags))
+    if (collides(player_x + dx, player_y, grid_flags, WALL) && dx) {
+      while (!collides(player_x + sign(dx), player_y, grid_flags, WALL))
         player_x += sign(dx);
       
       dx = 0;
@@ -284,14 +294,22 @@ int main(int num_args, char* args[]) {
     player_x += dx;
 
     // if it's going to collid (vert), inch there 1px at a time
-    if (collides_w_wall(player_x, player_y + dy, grid_flags) && dy) {
-      while (!collides_w_wall(player_x, player_y + sign(dy), grid_flags))
+    if (collides(player_x, player_y + dy, grid_flags, WALL) && dy) {
+      while (!collides(player_x, player_y + sign(dy), grid_flags, WALL))
         player_y += sign(dy);
       
       dy = 0;
     }
     player_y += dy;
 
+    // player fell offscreen; start over
+    if (player_x < 0 || player_x > vp.w || player_y < 0 || player_y > vp.h) {
+      grav = 0.2;
+      dx = 0;
+      dy = 0;
+      player_x = 0;
+      player_y = 0;
+    }
 
     // set BG color
     if (SDL_SetRenderDrawColor(renderer, 44, 34, 30, 255) < 0)
@@ -300,20 +318,27 @@ int main(int num_args, char* args[]) {
       error("clearing renderer");
 
     // render grid
-    if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
-      error("setting land color");
 
     for (int i = 0; i < grid_len; ++i) {
       int x = to_x(i);
       int y = to_y(i);
 
-      if (grid_flags[i] & WALL) {
+      if (grid_flags[i]) {
         SDL_Rect wall_rect = {
           .x = x * block_w - vp.x,
           .y = y * block_h - vp.y,
           .w = block_w,
           .h = block_h
         };
+        if (grid_flags[i] & REVERSE_GRAV) {
+          if (SDL_SetRenderDrawColor(renderer, 40, 114, 35, 255) < 0)
+            error("setting grav color");
+        }
+        else if (grid_flags[i] & WALL) {
+          if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
+            error("setting wall color");
+        }
+
         if (SDL_RenderFillRect(renderer, &wall_rect) < 0)
           error("filling wall rect");
       }
@@ -397,12 +422,12 @@ int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, 
   return i * size * 8;
 }
 
-bool collides_w_wall(int player_x, int player_y, byte grid_flags[]) {
+bool collides(int player_x, int player_y, byte grid_flags[], byte type) {
   int player_x2 = player_x + player_w;
   int player_y2 = player_y + player_h;
 
   for (int i = 0; i < grid_len; ++i) {
-    if (grid_flags[i] & WALL) {
+    if (grid_flags[i] & type) {
       int x = to_x(i) * block_w;
       int y = to_y(i) * block_h;
       int x2 = x + block_w;
