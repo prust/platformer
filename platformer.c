@@ -73,6 +73,9 @@ bool right_pressed = false;
 bool up_pressed = false;
 bool down_pressed = false;
 
+// dead zone makes it so light taps on controller joysticks doesn't drift the player
+const int JOYSTICK_DEAD_ZONE = 8000;
+
 int main(int num_args, char* args[]) {
   byte grid_flags[grid_len];
 
@@ -81,11 +84,11 @@ int main(int num_args, char* args[]) {
   // printf("Seed: %lld\n", seed);
   
   // SDL setup
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK) < 0)
     error("initializing SDL");
 
   SDL_Window* window;
-  window = SDL_CreateWindow("Future Fortress", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
+  window = SDL_CreateWindow("Platformer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, num_blocks_w * block_w, num_blocks_h * block_h, SDL_WINDOW_RESIZABLE);
   if (!window)
     error("creating window");
 
@@ -122,6 +125,16 @@ int main(int num_args, char* args[]) {
 
   if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
     error("setting blend mode");
+
+  // joystick/controller support
+  SDL_Joystick* controller = NULL;
+  if (SDL_NumJoysticks() >= 1) {
+    controller = SDL_JoystickOpen(0);
+    if (controller == NULL) {
+      error("Unable to open game controller");
+    }
+
+  }
 
   SDL_Event evt;
   bool exit_game = false;
@@ -238,6 +251,23 @@ int main(int num_args, char* args[]) {
           }
           else if (evt.key.keysym.sym == SDLK_f) {
             mode_type = FINISH;
+          }
+          break;
+
+        case SDL_JOYAXISMOTION:
+          // X axis
+          if (evt.jaxis.axis == 0) {
+            if (evt.jaxis.value < -JOYSTICK_DEAD_ZONE)
+              left_pressed = true;
+            else if (evt.jaxis.value > JOYSTICK_DEAD_ZONE)
+              right_pressed = true;
+          }
+          // Y axis
+          else {
+            if (evt.jaxis.value < -JOYSTICK_DEAD_ZONE)
+              up_pressed = true;
+            else if (evt.jaxis.value > JOYSTICK_DEAD_ZONE)
+              down_pressed = true;
           }
           break;
       }
@@ -389,6 +419,9 @@ int main(int num_args, char* args[]) {
     SDL_RenderPresent(renderer);
     SDL_Delay(10);
   }
+
+  if (controller != NULL)
+    SDL_JoystickClose(controller);
 
   if (SDL_SetWindowFullscreen(window, 0) < 0)
     error("exiting fullscreen");
