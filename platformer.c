@@ -19,6 +19,7 @@ typedef unsigned char byte;
 #define LAVA         0x4
 #define FINISH       0x8
 #define CHECKPOINT   0x10
+#define PORTAL       0x20
 
 typedef struct {
   byte flags;
@@ -41,7 +42,7 @@ int to_y(int ix);
 int to_pos(int x, int y);
 
 int sign(float n);
-bool collides(int player_x, int player_y, byte grid_flags[], byte type);
+int collides(int player_x, int player_y, byte grid_flags[], byte type);
 int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
 
 void error(char* activity);
@@ -265,6 +266,9 @@ int main(int num_args, char* args[]) {
           else if (evt.key.keysym.sym == SDLK_c) {
             mode_type = CHECKPOINT;
           }
+          else if (evt.key.keysym.sym == SDLK_p) {
+            mode_type = PORTAL;
+          }
           break;
 
         case SDL_JOYAXISMOTION:
@@ -342,20 +346,35 @@ int main(int num_args, char* args[]) {
     if ((grav > 0 && dy < 10) || (grav < 0 && dy > -10))
       dy += grav;
 
-    if (collides(player_x + dx, player_y + dy, grid_flags, REVERSE_GRAV))
+    if (collides(player_x + dx, player_y + dy, grid_flags, REVERSE_GRAV) > -1)
       grav = -grav;
 
-    if (collides(player_x + dx, player_y + dy, grid_flags, FINISH))
+    if (collides(player_x + dx, player_y + dy, grid_flags, FINISH) > -1)
       won_game = true;
 
-    if (collides(player_x + dx, player_y + dy, grid_flags, CHECKPOINT)) {
+    if (collides(player_x + dx, player_y + dy, grid_flags, CHECKPOINT) > -1) {
       start_x = player_x;
       start_y = player_y;
       start_grav = grav;
     }
 
+    int portal_ix = collides(player_x + dx, player_y + dy, grid_flags, PORTAL);
+    if (portal_ix > -1) {
+      for (int i = 0; i < grid_len; ++i) {
+        if (i != portal_ix && grid_flags[i] & PORTAL) {
+          int delta_x = (to_x(i) - to_x(portal_ix)) * block_w;
+          int delta_y = (to_y(i) - to_y(portal_ix)) * block_h;
+          player_x += delta_x;
+          player_y += delta_y;
+          dx = -dx;
+          dy = -dy;
+          break;
+        }
+      }
+    }
+
     // start over if you hit lava or fall offscreen
-    if (collides(player_x + dx, player_y + dy, grid_flags, LAVA) ||
+    if ((collides(player_x + dx, player_y + dy, grid_flags, LAVA) > -1) ||
       player_x < 0 || player_x > vp.w || player_y < 0 || player_y > vp.h) {
       grav = start_grav;
       dx = 0;
@@ -365,14 +384,14 @@ int main(int num_args, char* args[]) {
     }
 
     // if touching ground, & jump button pressed, jump
-    if (up_pressed && collides(player_x, player_y + 1, grid_flags, WALL))
+    if (up_pressed && collides(player_x, player_y + 1, grid_flags, WALL) > -1)
       dy = -jump_speed;
-    else if (down_pressed && collides(player_x, player_y - 1, grid_flags, WALL))
+    else if (down_pressed && collides(player_x, player_y - 1, grid_flags, WALL) > -1)
       dy = jump_speed;
 
     // if it's going to collide (horiz), inch there 1px at a time
-    if (collides(player_x + dx, player_y, grid_flags, WALL) && dx) {
-      while (!collides(player_x + sign(dx), player_y, grid_flags, WALL))
+    if (collides(player_x + dx, player_y, grid_flags, WALL) > -1 && dx) {
+      while (!(collides(player_x + sign(dx), player_y, grid_flags, WALL) > -1))
         player_x += sign(dx);
       
       dx = 0;
@@ -380,8 +399,8 @@ int main(int num_args, char* args[]) {
     player_x += dx;
 
     // if it's going to collid (vert), inch there 1px at a time
-    if (collides(player_x, player_y + dy, grid_flags, WALL) && dy) {
-      while (!collides(player_x, player_y + sign(dy), grid_flags, WALL))
+    if (collides(player_x, player_y + dy, grid_flags, WALL) > -1 && dy) {
+      while (!(collides(player_x, player_y + sign(dy), grid_flags, WALL) > -1))
         player_y += sign(dy);
       
       dy = 0;
@@ -423,6 +442,10 @@ int main(int num_args, char* args[]) {
         else if (grid_flags[i] & CHECKPOINT) {
           if (SDL_SetRenderDrawColor(renderer, 239, 220, 20, 225) < 0)
             error("setting checkpoint color");
+        }
+        else if (grid_flags[i] & PORTAL) {
+          if (SDL_SetRenderDrawColor(renderer, 24, 101, 192, 255) < 0)
+            error("setting portal color");
         }
         else if (grid_flags[i] & WALL) {
           if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
@@ -515,7 +538,7 @@ int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, 
   return i * size * 8;
 }
 
-bool collides(int player_x, int player_y, byte grid_flags[], byte type) {
+int collides(int player_x, int player_y, byte grid_flags[], byte type) {
   int player_x2 = player_x + player_w;
   int player_y2 = player_y + player_h;
 
@@ -529,10 +552,10 @@ bool collides(int player_x, int player_y, byte grid_flags[], byte type) {
       // DO collide if
       if (player_x2 > x && player_x < x2 &&
         player_y2 > y && player_y < y2)
-          return true;
+          return i;
     }
   }
-  return false;
+  return -1;
 }
 
 void error(char* activity) {
