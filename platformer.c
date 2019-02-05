@@ -14,10 +14,11 @@
 typedef unsigned char byte;
 
 // grid flags
-#define WALL 0x01
-#define REVERSE_GRAV 0x02
-#define LAVA 0x04
-#define FINISH 0x08
+#define WALL         0x1
+#define REVERSE_GRAV 0x2
+#define LAVA         0x4
+#define FINISH       0x8
+#define CHECKPOINT   0x10
 
 typedef struct {
   byte flags;
@@ -57,13 +58,16 @@ const int grid_len = num_blocks_w * num_blocks_h;
 FILE *level_file;
 
 // adapted from https://www.reddit.com/r/gamemaker/comments/37y24e/perfect_platformer_code/
+float start_grav = 0.2;
 float grav = 0.2;
 float dx = 0;
 float dy = 0;
 int jump_speed = 4;
 int move_speed = 2;
 
+int start_x = 0;
 int player_x = 0;
+int start_y = 0;
 int player_y = 0;
 int player_w = 10;
 int player_h = 10;
@@ -258,6 +262,9 @@ int main(int num_args, char* args[]) {
           else if (evt.key.keysym.sym == SDLK_f) {
             mode_type = FINISH;
           }
+          else if (evt.key.keysym.sym == SDLK_c) {
+            mode_type = CHECKPOINT;
+          }
           break;
 
         case SDL_JOYAXISMOTION:
@@ -341,14 +348,20 @@ int main(int num_args, char* args[]) {
     if (collides(player_x + dx, player_y + dy, grid_flags, FINISH))
       won_game = true;
 
+    if (collides(player_x + dx, player_y + dy, grid_flags, CHECKPOINT)) {
+      start_x = player_x;
+      start_y = player_y;
+      start_grav = grav;
+    }
+
     // start over if you hit lava or fall offscreen
     if (collides(player_x + dx, player_y + dy, grid_flags, LAVA) ||
       player_x < 0 || player_x > vp.w || player_y < 0 || player_y > vp.h) {
-      grav = 0.2;
+      grav = start_grav;
       dx = 0;
       dy = 0;
-      player_x = 0;
-      player_y = 0;
+      player_x = start_x;
+      player_y = start_y;
     }
 
     // if touching ground, & jump button pressed, jump
@@ -406,6 +419,10 @@ int main(int num_args, char* args[]) {
         else if (grid_flags[i] & FINISH) {
           if (SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) < 0)
             error("setting finish color");
+        }
+        else if (grid_flags[i] & CHECKPOINT) {
+          if (SDL_SetRenderDrawColor(renderer, 239, 220, 20, 225) < 0)
+            error("setting checkpoint color");
         }
         else if (grid_flags[i] & WALL) {
           if (SDL_SetRenderDrawColor(renderer, 145, 103, 47, 255) < 0)
