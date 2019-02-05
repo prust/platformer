@@ -84,7 +84,8 @@ int main(int num_args, char* args[]) {
   // printf("Seed: %lld\n", seed);
   
   // SDL setup
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK) < 0)
+  SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) < 0)
     error("initializing SDL");
 
   SDL_Window* window;
@@ -126,14 +127,19 @@ int main(int num_args, char* args[]) {
   if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
     error("setting blend mode");
 
-  // joystick/controller support
-  SDL_Joystick* controller = NULL;
-  if (SDL_NumJoysticks() >= 1) {
-    controller = SDL_JoystickOpen(0);
-    if (controller == NULL) {
-      error("Unable to open game controller");
-    }
-
+  int MAX_CONTROLLERS = 4;
+  SDL_GameController *ControllerHandles[MAX_CONTROLLERS];
+  int MaxJoysticks = SDL_NumJoysticks();
+  int ControllerIndex = 0;
+  for(int JoystickIndex=0; JoystickIndex < MaxJoysticks; ++JoystickIndex){
+      if (!SDL_IsGameController(JoystickIndex))
+          continue;
+      
+      if (ControllerIndex >= MAX_CONTROLLERS)
+          break;
+      
+      ControllerHandles[ControllerIndex] = SDL_GameControllerOpen(JoystickIndex);
+      ControllerIndex++;
   }
 
   SDL_Event evt;
@@ -153,10 +159,10 @@ int main(int num_args, char* args[]) {
 
   while (!exit_game) {
     // reset left/right every time when not using a controller
-    if (controller == NULL) {
-      left_pressed = false;
-      right_pressed = false;
-    }
+    // if (controller == NULL) {
+    //   left_pressed = false;
+    //   right_pressed = false;
+    // }
     up_pressed = false;
     down_pressed = false;
     bool was_paused = is_paused;
@@ -277,11 +283,14 @@ int main(int num_args, char* args[]) {
           break;
 
         case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONUP:
           if (evt.cbutton.button == SDL_CONTROLLER_BUTTON_A) {
-            if (grav > 0)
+            if (grav > 0.0) {
               up_pressed = true;
-            else if (grav < 0)
+            }
+            else if (grav < 0.0) {
               down_pressed = true;
+            }
           }
           break;
       }
@@ -434,8 +443,12 @@ int main(int num_args, char* args[]) {
     SDL_Delay(10);
   }
 
-  if (controller != NULL)
-    SDL_JoystickClose(controller);
+  for(int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS; ++ControllerIndex) {
+     if (ControllerHandles[ControllerIndex])
+     {
+         SDL_GameControllerClose(ControllerHandles[ControllerIndex]);
+     }
+  }
 
   if (SDL_SetWindowFullscreen(window, 0) < 0)
     error("exiting fullscreen");
