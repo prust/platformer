@@ -134,9 +134,12 @@ int main(int num_args, char* args[]) {
 
   int MAX_CONTROLLERS = 4;
   SDL_GameController *ControllerHandles[MAX_CONTROLLERS];
+  for (int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS; ++ControllerIndex)
+    ControllerHandles[ControllerIndex] = NULL;
+
   int MaxJoysticks = SDL_NumJoysticks();
   int ControllerIndex = 0;
-  for(int JoystickIndex=0; JoystickIndex < MaxJoysticks; ++JoystickIndex){
+  for(int JoystickIndex=0; JoystickIndex < MaxJoysticks; ++JoystickIndex) {
       if (!SDL_IsGameController(JoystickIndex))
           continue;
       
@@ -483,12 +486,9 @@ int main(int num_args, char* args[]) {
     SDL_Delay(10);
   }
 
-  for(int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS; ++ControllerIndex) {
-     if (ControllerHandles[ControllerIndex])
-     {
-         SDL_GameControllerClose(ControllerHandles[ControllerIndex]);
-     }
-  }
+  for (int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS; ++ControllerIndex)
+    if (ControllerHandles[ControllerIndex])
+      SDL_GameControllerClose(ControllerHandles[ControllerIndex]);
 
   if (SDL_SetWindowFullscreen(window, 0) < 0)
     error("exiting fullscreen");
