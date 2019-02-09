@@ -16,12 +16,13 @@
 typedef unsigned char byte;
 
 // entity flags
-#define WALL         0x1
-#define REVERSE_GRAV 0x2
-#define LAVA         0x4
-#define FINISH       0x8
-#define CHECKPOINT   0x10
-#define PORTAL       0x20
+#define WALL          0x1
+#define REVERSE_GRAV  0x2
+#define LAVA          0x4
+#define FINISH        0x8
+#define CHECKPOINT    0x10
+#define PORTAL        0x20
+#define UNLINKED_BBOX 0x40
 
 typedef uint32_t Color;
 
@@ -61,14 +62,22 @@ Color colors[32] = {
   0xff306f8a,
 };
 
+// shape types
+byte POLYGON = 0;
+
+byte NO_COLOR = 32;
+
 byte curr_color_ix = 0;
 
 typedef struct {
-  short x[64];
-  short y[64];
-  byte vertices_len;
-  byte color_ix;
-  bool is_filled;
+  byte type;
+  byte fill_color_ix;
+  byte stroke_width;
+  byte stroke_color_ix;
+  byte len_vertices;
+  byte max_vertices;
+  short* x;
+  short* y;
 } Shape;
 
 typedef struct {
@@ -78,8 +87,9 @@ typedef struct {
   short y;
   short w;
   short h;
-  Shape shapes[64];
-  byte shapes_len;
+  byte len_shapes;
+  byte max_shapes;
+  Shape* shapes;
 } Entity;
 
 typedef struct {
@@ -98,7 +108,7 @@ void error(char* activity);
 // game globals
 Viewport vp = {};
 
-int entities_len;
+short len_entities;
 int max_entities;
 
 FILE *level_file;
@@ -123,6 +133,9 @@ bool right_pressed = false;
 bool up_pressed = false;
 bool down_pressed = false;
 
+short level_w;
+short level_h;
+
 // dead zone makes it so light taps on controller joysticks doesn't drift the player
 const int JOYSTICK_DEAD_ZONE = 8000;
 
@@ -137,7 +150,6 @@ int main(int num_args, char* args[]) {
   if (rlimit_rlt > 0)
     fprintf(stderr, "setrlimit returned error %d\n", rlimit_rlt);
 
-  entities_len = 0;
   max_entities = 100;
   Entity entities[max_entities];
 
@@ -162,15 +174,98 @@ int main(int num_args, char* args[]) {
   SDL_GetWindowSize(window, &vp.w, &vp.h);
   //vp.h -= header_height;
 
-  // level_file = fopen("first.level1", "rb"); // read binary
+  level_file = fopen("current.level2", "rb"); // read binary
 
-  // if (level_file != NULL) {
-  //   int num_bytes_read = fread(grid_flags, grid_len, 1, level_file); // read bytes to our buffer
-  //   if (ferror(level_file))
-  //     printf("reading level file: %s\n", strerror(errno));
+  if (level_file == NULL) {
+    len_entities = 0;
+    level_w = vp.w;
+    level_h = vp.h;
+    
+    // create a default ground
+    len_entities++;
+    Entity ground = {
+      .flags = WALL,
+      .x = 0,
+      .y = vp.h - 75,
+      .w = vp.w,
+      .h = 25,
+      .shapes = (Shape*)calloc(64, sizeof(Shape)),
+    };
+    entities[0] = ground;
+    entities[0].len_shapes++;
+    
+    Shape ground_shape = {
+      .x = (short*)calloc(64, sizeof(short)),
+      .y = (short*)calloc(64, sizeof(short)),
+      .len_vertices = 4,
+      .max_vertices = 64,
+      .fill_color_ix = 6,
+      .stroke_color_ix = NO_COLOR
+    };
+    ground_shape.x[0] = 0, ground_shape.y[0] = vp.h - 75;
+    ground_shape.x[1] = 0, ground_shape.y[1] = vp.h - 50; 
+    ground_shape.x[2] = vp.w, ground_shape.y[2] = vp.h - 50;
+    ground_shape.x[3] = vp.w, ground_shape.y[3] = vp.h - 75;
+    entities[0].shapes[0] = ground_shape;
+  }
+  else {
+    // seek to the end to find the size
+    if (fseek(level_file, 0, SEEK_END)) {
+      fclose(level_file);
+      error("Error seeking to the end of the level file");
+    }
 
-  //   fclose(level_file);
-  // }
+    size_t num_bytes = ftell(level_file);
+
+    if (fseek(level_file, 0, SEEK_SET)) {
+      fclose(level_file);
+      error("Error seeking to the beginning of the level file");
+    }
+
+    void* buffer = calloc(1, num_bytes);
+    fread(buffer, num_bytes, 1, level_file); // read bytes to our buffer
+    if (ferror(level_file))
+      printf("reading level file: %s\n", strerror(errno));
+    
+    fclose(level_file);
+
+    void* buffer_ix = buffer;
+    memcpy(&len_entities, buffer_ix, sizeof(len_entities));
+    buffer_ix += sizeof(len_entities);
+    memcpy(&level_w, buffer_ix, sizeof(level_w));
+    buffer_ix += sizeof(level_w);
+    memcpy(&level_h, buffer_ix, sizeof(level_h));
+    buffer_ix += sizeof(level_h);
+
+    for (int i = 0; i < len_entities; ++i) {
+      Entity* entity = &entities[i];
+      memcpy(entity, buffer_ix, sizeof(Entity));
+      buffer_ix += sizeof(Entity);
+
+      entity->shapes = (Shape*)calloc(64, sizeof(Shape));
+      for (int j = 0; j < entity->len_shapes; ++j) {
+        Shape* shape = &(entity->shapes[j]);
+        memcpy(shape, buffer_ix, sizeof(Shape));
+        buffer_ix += sizeof(Shape);
+
+        shape->x = (short*)calloc(64, sizeof(short)),
+        shape->y = (short*)calloc(64, sizeof(short)),
+
+        // copy x & y vertices
+        memcpy(shape->x, buffer_ix, shape->len_vertices * sizeof(short));
+        buffer_ix += shape->len_vertices * sizeof(short);
+        memcpy(shape->y, buffer_ix, shape->len_vertices * sizeof(short));
+        buffer_ix += shape->len_vertices * sizeof(short);
+      }
+    }
+
+    // sanity check
+    if (buffer_ix - buffer != num_bytes) {
+      printf("%lu - num_bytes\n", num_bytes);
+      printf("%lu - pointer diff\n", buffer_ix - buffer);
+      error("byte mismatch on file save");
+    }
+  }
 
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
   if (!renderer)
@@ -218,49 +313,6 @@ int main(int num_args, char* args[]) {
   int palette_y = vp.h - palette_color_size;
   int palette_w = colors_len * palette_color_size;
   int palette_h = palette_color_size;
-
-  // create empty default entity & shape
-  Entity default_entity = {
-    .flags = 0,
-    .health = 0,
-    .x = 0,
-    .y = 0,
-    .w = 0,
-    .h = 0,
-    .shapes = {},
-    .shapes_len = 0
-  };
-
-  Shape default_shape = {
-    .x = {},
-    .y = {},
-    .vertices_len = 0,
-    .color_ix = curr_color_ix,
-    .is_filled = false
-  };
-
-  // create a default ground
-  entities_len++;
-  Entity ground = {
-    .flags = WALL,
-    .health = 0,
-    .x = 0,
-    .y = vp.h - 75,
-    .w = vp.w,
-    .h = 25,
-    .shapes = {},
-    .shapes_len = 0
-  };
-  entities[0] = ground;
-  entities[0].shapes_len++;
-  Shape ground_shape = {
-    .x = {0, 0, vp.w, vp.w},
-    .y = {vp.h - 75, vp.h - 50, vp.h - 50, vp.h - 75},
-    .vertices_len = 4,
-    .color_ix = 6,
-    .is_filled = true
-  };
-  entities[0].shapes[0] = ground_shape;
 
   Shape* selected_shape = NULL;
 
@@ -312,20 +364,21 @@ int main(int num_args, char* args[]) {
           if (mouse_x >= palette_x && mouse_x <= palette_x + palette_w && mouse_y >= palette_y && mouse_y <= palette_y + palette_h) {
             curr_color_ix = (mouse_x - palette_x) / palette_color_size;
             if (selected_shape)
-              selected_shape->color_ix = curr_color_ix;
+              selected_shape->stroke_color_ix = curr_color_ix;
           }
           else if (selected_shape) {
             // snap to complete shape
             if (abs(mouse_x - selected_shape->x[0]) < 8 &&
-              abs(mouse_y - selected_shape->y[0]) < 8 && selected_shape->vertices_len > 1) {
+              abs(mouse_y - selected_shape->y[0]) < 8 && selected_shape->len_vertices > 1) {
               mouse_x = selected_shape->x[0];
               mouse_y = selected_shape->y[0];
-              selected_shape->is_filled = true;
+              selected_shape->fill_color_ix = selected_shape->stroke_color_ix;
+              selected_shape->stroke_color_ix = NO_COLOR;
             }
 
-            selected_shape->x[selected_shape->vertices_len - 1] = mouse_x;
-            selected_shape->y[selected_shape->vertices_len - 1] = mouse_y;
-            if (selected_shape->is_filled) {
+            selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
+            selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
+            if (selected_shape->fill_color_ix != NO_COLOR) {
               selected_shape = NULL;
             }
             else {
@@ -334,7 +387,7 @@ int main(int num_args, char* args[]) {
               short max_x = selected_shape->x[0];
               short min_y = selected_shape->y[0];
               short max_y = selected_shape->y[0];
-              for (int i = 1; i < selected_shape->vertices_len; ++i) {
+              for (int i = 1; i < selected_shape->len_vertices; ++i) {
                 if (selected_shape->x[i] < min_x)
                   min_x = selected_shape->x[i];
                 else if (selected_shape->x[i] > max_x)
@@ -344,30 +397,32 @@ int main(int num_args, char* args[]) {
                 else if (selected_shape->y[i] > max_y)
                   max_y = selected_shape->y[i];
               }
-              entities[entities_len - 1].x = min_x;
-              entities[entities_len - 1].y = min_y;
-              entities[entities_len - 1].w = max_x - min_x;
-              entities[entities_len - 1].h = max_y - min_y;
+              entities[len_entities - 1].x = min_x;
+              entities[len_entities - 1].y = min_y;
+              entities[len_entities - 1].w = max_x - min_x;
+              entities[len_entities - 1].h = max_y - min_y;
 
               // create new tentative point
-              selected_shape->vertices_len++;
-              selected_shape->x[selected_shape->vertices_len - 1] = mouse_x;
-              selected_shape->y[selected_shape->vertices_len - 1] = mouse_y;
+              selected_shape->len_vertices++;
+              selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
+              selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
             }
           }
           else {
-            entities_len++;
-            entities[entities_len - 1] = default_entity;
-            entities[entities_len - 1].flags = WALL | mode_type;
-            entities[entities_len - 1].shapes_len++;
-            entities[entities_len - 1].shapes[0] = default_shape;
-            entities[entities_len - 1].shapes[0].color_ix = curr_color_ix;
+            len_entities++;
+            entities[len_entities - 1].flags = WALL | mode_type;
+            entities[len_entities - 1].shapes = (Shape*)calloc(64, sizeof(Shape)),
+            entities[len_entities - 1].len_shapes++;
+            entities[len_entities - 1].shapes[0].x = (short*)calloc(64, sizeof(short));
+            entities[len_entities - 1].shapes[0].y = (short*)calloc(64, sizeof(short));
+            entities[len_entities - 1].shapes[0].stroke_color_ix = curr_color_ix;
+            entities[len_entities - 1].shapes[0].fill_color_ix = NO_COLOR;
 
-            selected_shape = &(entities[entities_len - 1].shapes[0]);
+            selected_shape = &(entities[len_entities - 1].shapes[0]);
 
             selected_shape->x[0] = mouse_x;
             selected_shape->y[0] = mouse_y;
-            selected_shape->vertices_len = 2;
+            selected_shape->len_vertices = 2;
             selected_shape->x[1] = mouse_x;
             selected_shape->y[1] = mouse_y;
           }
@@ -385,8 +440,8 @@ int main(int num_args, char* args[]) {
               mouse_y = selected_shape->y[0];
             }
 
-            selected_shape->x[selected_shape->vertices_len - 1] = mouse_x;
-            selected_shape->y[selected_shape->vertices_len - 1] = mouse_y;
+            selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
+            selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
           }
           break;
 
@@ -398,19 +453,69 @@ int main(int num_args, char* args[]) {
             is_paused = !is_paused;
           }
           else if (evt.key.keysym.sym == SDLK_s) {
-            // level_file = fopen("first.level1", "wb"); // read binary
+            level_file = fopen("current.level2", "wb"); // read binary
 
-            // if (level_file) {
-            //   int num_bytes_written = fwrite(grid_flags, grid_len, 1, level_file); // write bytes to file
-            //   if (ferror(level_file))
-            //     error("writing level file");
+            if (level_file) {
+              // calc the # of bytes we need
+              size_t num_bytes = sizeof(len_entities) + sizeof(level_w) + sizeof(level_h);
+              for (int i = 0; i < len_entities; ++i) {
+                Entity* entity = &entities[i];
+                num_bytes += sizeof(Entity);
+
+                for (int j = 0; j < entity->len_shapes; ++j) {
+                  Shape* shape = &(entity->shapes[j]);
+                  num_bytes += sizeof(Shape);
+                  num_bytes += shape->len_vertices * sizeof(short) * 2;
+                }
+              }
+
+              // malloc() a buffer & copy the bytes to the buffer
+              void* buffer = malloc(num_bytes);
+              void* buffer_ix = buffer;
+              memcpy(buffer_ix, &len_entities, sizeof(len_entities));
+              buffer_ix += sizeof(len_entities);
+              memcpy(buffer_ix, &level_w, sizeof(level_w));
+              buffer_ix += sizeof(level_w);
+              memcpy(buffer_ix, &level_h, sizeof(level_h));
+              buffer_ix += sizeof(level_h);
+
+              for (int i = 0; i < len_entities; ++i) {
+                Entity* entity = &entities[i];
+                memcpy(buffer_ix, entity, sizeof(Entity));
+                buffer_ix += sizeof(Entity);
+
+                for (int j = 0; j < entity->len_shapes; ++j) {
+                  Shape* shape = &(entity->shapes[j]);
+                  memcpy(buffer_ix, shape, sizeof(Shape));
+                  buffer_ix += sizeof(Shape);
+
+                  // copy x & y vertices
+                  memcpy(buffer_ix, shape->x, shape->len_vertices * sizeof(short));
+                  buffer_ix += shape->len_vertices * sizeof(short);
+                  memcpy(buffer_ix, shape->y, shape->len_vertices * sizeof(short));
+                  buffer_ix += shape->len_vertices * sizeof(short);
+                }
+              }
+
+              // sanity check
+              if (buffer_ix - buffer != num_bytes) {
+                printf("%lu - num_bytes\n", num_bytes);
+                printf("%lu - pointer diff\n", buffer_ix - buffer);
+                error("byte mismatch on file save");
+              }
               
-            //   fclose(level_file);
-            // }
+              // write the bytes to the file
+              fwrite(buffer, num_bytes, 1, level_file); // write bytes to file
+              if (ferror(level_file))
+                error("writing level file");
+              
+              fclose(level_file);
+              free(buffer);
+            }
           }
           else if (evt.key.keysym.sym == SDLK_RETURN) {
             if (selected_shape) {
-              selected_shape->vertices_len--;
+              selected_shape->len_vertices--;
               selected_shape = NULL;
             }
           }
@@ -531,7 +636,7 @@ int main(int num_args, char* args[]) {
 
     int portal_ix = collides(player_x + dx, player_y + dy, entities, PORTAL);
     if (portal_ix > -1) {
-      for (int i = 0; i < entities_len; ++i) {
+      for (int i = 0; i < len_entities; ++i) {
         if (i != portal_ix && entities[i].flags & PORTAL) {
           int delta_x = entities[i].x - entities[portal_ix].x;
           int delta_y = entities[i].y - entities[portal_ix].y;
@@ -586,19 +691,19 @@ int main(int num_args, char* args[]) {
       error("clearing renderer");
 
     // render polygon
-    for (int i = 0; i < entities_len; ++i) {
+    for (int i = 0; i < len_entities; ++i) {
       Entity* ent = &entities[i];
       Shape* shape = &ent->shapes[0];
 
       short *vx = shape->x;
       short *vy = shape->y;
-      if (shape->is_filled) {
-        aapolygonColor(renderer, vx, vy, shape->vertices_len, colors[shape->color_ix]);    
-        filledPolygonColor(renderer, vx, vy, shape->vertices_len, colors[shape->color_ix]);// 0xFF000000);
+      if (shape->fill_color_ix != NO_COLOR) {
+        aapolygonColor(renderer, vx, vy, shape->len_vertices, colors[shape->fill_color_ix]);
+        filledPolygonColor(renderer, vx, vy, shape->len_vertices, colors[shape->fill_color_ix]);// 0xFF000000);
       }
       else {
-        for (int j = 0; j < shape->vertices_len - 1; ++j) {
-          aalineColor(renderer, vx[j], vy[j], vx[j + 1], vy[j + 1], colors[shape->color_ix]);
+        for (int j = 0; j < shape->len_vertices - 1; ++j) {
+          aalineColor(renderer, vx[j], vy[j], vx[j + 1], vy[j + 1], colors[shape->stroke_color_ix]);
 
           // thickLineColor(renderer, vx[j], vy[j], vx[j + 1], vy[j + 1], 2, colors[shape->color_ix]);
           
@@ -629,6 +734,17 @@ int main(int num_args, char* args[]) {
 
     SDL_RenderPresent(renderer);
     SDL_Delay(10);
+  }
+
+  // free dynamically allocated memory
+  for (int i = 0; i < len_entities; ++i) {
+    Entity* ent = &entities[i];
+    for (int j = 0; j < ent->len_shapes; ++j) {
+      Shape* shape = &(ent->shapes[i]);
+      free(shape->x);
+      free(shape->y);
+    }
+    free(ent->shapes);
   }
 
   for (int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS; ++ControllerIndex)
@@ -678,7 +794,7 @@ int collides(int player_x, int player_y, Entity entities[], byte type) {
   int player_x2 = player_x + player_w;
   int player_y2 = player_y + player_h;
 
-  for (int i = 0; i < entities_len; ++i) {
+  for (int i = 0; i < len_entities; ++i) {
     if (entities[i].flags & type) {
       int x = entities[i].x;
       int y = entities[i].y;
