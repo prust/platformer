@@ -99,17 +99,26 @@ typedef struct {
   int h;
 } Viewport;
 
-int sign(float n);
-int collides(int player_x, int player_y, Entity entities[], byte type);
+Entity* createEntity(byte mode_type, byte color_ix);
+void updateEntityBBox(Entity* ent);
+void deleteEntity(int entity_ix);
+int indexOfEntity(short x, short y, short w, short h);
+void addRectPoints(Shape* shape, short x, short y, short w, short h);
+void addPoint(Shape* shape, short x, short y);
+void fillShape(Shape* shape);
 int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
-
+int collides(int player_x, int player_y, Entity entities[], byte type);
+int sign(float n);
 void error(char* activity);
 
 // game globals
 Viewport vp = {};
 
+byte grid_size = 30;
+
 short len_entities;
-int max_entities;
+#define max_entities 100
+Entity entities[max_entities];
 
 FILE *level_file;
 
@@ -150,9 +159,6 @@ int main(int num_args, char* args[]) {
   if (rlimit_rlt > 0)
     fprintf(stderr, "setrlimit returned error %d\n", rlimit_rlt);
 
-  max_entities = 100;
-  Entity entities[max_entities];
-
   time_t seed = 1529597895; //time(NULL);
   srand(seed);
   // printf("Seed: %lld\n", seed);
@@ -181,7 +187,7 @@ int main(int num_args, char* args[]) {
     level_w = vp.w;
     level_h = vp.h;
     
-    // create a default ground
+    // create a default ground entity/shape
     len_entities++;
     Entity ground = {
       .flags = WALL,
@@ -299,8 +305,9 @@ int main(int num_args, char* args[]) {
   unsigned int start_time = SDL_GetTicks();
   unsigned int pause_start = 0;
 
-  bool mode_destroy = false;
+  bool destroy_mode = false;
   byte mode_type = WALL;
+  bool tile_mode = true;
   bool mouse_is_down = false;
   bool won_game = false;
 
@@ -366,83 +373,101 @@ int main(int num_args, char* args[]) {
             if (selected_shape)
               selected_shape->stroke_color_ix = curr_color_ix;
           }
-          else if (selected_shape) {
-            // snap to complete shape
-            if (abs(mouse_x - selected_shape->x[0]) < 8 &&
-              abs(mouse_y - selected_shape->y[0]) < 8 && selected_shape->len_vertices > 1) {
-              mouse_x = selected_shape->x[0];
-              mouse_y = selected_shape->y[0];
-              selected_shape->fill_color_ix = selected_shape->stroke_color_ix;
-              selected_shape->stroke_color_ix = NO_COLOR;
-            }
+          else if (tile_mode) {
+            short x = mouse_x - (mouse_x % grid_size);
+            short y = mouse_y - (mouse_y % grid_size);
 
-            selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
-            selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
-            if (selected_shape->fill_color_ix != NO_COLOR) {
-              selected_shape = NULL;
+            int existing_tile_ix = indexOfEntity(x, y, grid_size, grid_size);
+
+            if (existing_tile_ix > -1) {
+              destroy_mode = true;
+              deleteEntity(existing_tile_ix);
             }
             else {
-              // update entity's bounding box by iterating vertices
-              short min_x = selected_shape->x[0];
-              short max_x = selected_shape->x[0];
-              short min_y = selected_shape->y[0];
-              short max_y = selected_shape->y[0];
-              for (int i = 1; i < selected_shape->len_vertices; ++i) {
-                if (selected_shape->x[i] < min_x)
-                  min_x = selected_shape->x[i];
-                else if (selected_shape->x[i] > max_x)
-                  max_x = selected_shape->x[i];
-                if (selected_shape->y[i] < min_y)
-                  min_y = selected_shape->y[i];
-                else if (selected_shape->y[i] > max_y)
-                  max_y = selected_shape->y[i];
-              }
-              entities[len_entities - 1].x = min_x;
-              entities[len_entities - 1].y = min_y;
-              entities[len_entities - 1].w = max_x - min_x;
-              entities[len_entities - 1].h = max_y - min_y;
-
-              // create new tentative point
-              selected_shape->len_vertices++;
-              selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
-              selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
+              destroy_mode = false;
+              Entity* ent = createEntity(mode_type, curr_color_ix);
+              Shape* shape = &(ent->shapes[0]);
+              fillShape(shape);
+              addRectPoints(shape, x, y, grid_size, grid_size);
+              updateEntityBBox(ent);
             }
           }
-          else {
-            len_entities++;
-            entities[len_entities - 1].flags = WALL | mode_type;
-            entities[len_entities - 1].shapes = (Shape*)calloc(64, sizeof(Shape)),
-            entities[len_entities - 1].len_shapes++;
-            entities[len_entities - 1].shapes[0].x = (short*)calloc(64, sizeof(short));
-            entities[len_entities - 1].shapes[0].y = (short*)calloc(64, sizeof(short));
-            entities[len_entities - 1].shapes[0].stroke_color_ix = curr_color_ix;
-            entities[len_entities - 1].shapes[0].fill_color_ix = NO_COLOR;
+          else { // drawing-mode
+            if (selected_shape) {
+              // snap to complete shape
+              if (abs(mouse_x - selected_shape->x[0]) < 8 &&
+                abs(mouse_y - selected_shape->y[0]) < 8 && selected_shape->len_vertices > 1) {
+                mouse_x = selected_shape->x[0];
+                mouse_y = selected_shape->y[0];
+                fillShape(selected_shape);
+              }
 
-            selected_shape = &(entities[len_entities - 1].shapes[0]);
+              selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
+              selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
+              if (selected_shape->fill_color_ix != NO_COLOR) {
+                selected_shape = NULL;
+              }
+              else {
+                updateEntityBBox(&(entities[len_entities - 1]));
 
-            selected_shape->x[0] = mouse_x;
-            selected_shape->y[0] = mouse_y;
-            selected_shape->len_vertices = 2;
-            selected_shape->x[1] = mouse_x;
-            selected_shape->y[1] = mouse_y;
+                // create new tentative point
+                addPoint(selected_shape, mouse_x, mouse_y);
+              }
+            }
+            else {
+              Entity* ent = createEntity(mode_type, curr_color_ix);
+              selected_shape = &(ent->shapes[0]);
+
+              selected_shape->x[0] = mouse_x;
+              selected_shape->y[0] = mouse_y;
+              selected_shape->len_vertices = 2;
+              selected_shape->x[1] = mouse_x;
+              selected_shape->y[1] = mouse_y;
+            }
           }
           break;
 
         case SDL_MOUSEMOTION:
           mouse_x = evt.button.x + vp.x;
           mouse_y = evt.button.y + vp.y;
-
-          if (selected_shape && mouse_y < palette_y) {
-            // snap to complete shape
-            if (abs(mouse_x - selected_shape->x[0]) < 8 &&
-              abs(mouse_y - selected_shape->y[0]) < 8) {
-              mouse_x = selected_shape->x[0];
-              mouse_y = selected_shape->y[0];
+          if (mouse_y < palette_y) {
+            if (tile_mode) {
+              if (mouse_is_down) {
+                short x = mouse_x - (mouse_x % grid_size);
+                short y = mouse_y - (mouse_y % grid_size);
+                
+                if (destroy_mode) {
+                  int existing_tile_ix = indexOfEntity(x, y, grid_size, grid_size);
+                  if (existing_tile_ix > -1)
+                    deleteEntity(existing_tile_ix);
+                }
+                else {
+                  int existing_tile_ix = indexOfEntity(x, y, grid_size, grid_size);
+                  if (existing_tile_ix == -1) {
+                    Entity* ent = createEntity(mode_type, curr_color_ix);
+                    Shape* shape = &(ent->shapes[0]);
+                    fillShape(shape);
+                    addRectPoints(shape, x, y, grid_size, grid_size);
+                    updateEntityBBox(ent);
+                  }
+                }
+              }
             }
+            else { // drawing mode
+              if (selected_shape) {
+                // snap to complete shape
+                if (abs(mouse_x - selected_shape->x[0]) < 8 &&
+                  abs(mouse_y - selected_shape->y[0]) < 8) {
+                  mouse_x = selected_shape->x[0];
+                  mouse_y = selected_shape->y[0];
+                }
 
-            selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
-            selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
+                selected_shape->x[selected_shape->len_vertices - 1] = mouse_x;
+                selected_shape->y[selected_shape->len_vertices - 1] = mouse_y;
+              }
+            }
           }
+
           break;
 
         case SDL_KEYDOWN:
@@ -451,6 +476,9 @@ int main(int num_args, char* args[]) {
           }
           else if (evt.key.keysym.sym == SDLK_SPACE) {
             is_paused = !is_paused;
+          }
+          else if (evt.key.keysym.sym == SDLK_t) {
+            tile_mode = !tile_mode;
           }
           else if (evt.key.keysym.sym == SDLK_s) {
             level_file = fopen("current.level2", "wb"); // read binary
@@ -693,7 +721,7 @@ int main(int num_args, char* args[]) {
     // render polygon
     for (int i = 0; i < len_entities; ++i) {
       Entity* ent = &entities[i];
-      Shape* shape = &ent->shapes[0];
+      Shape* shape = &(ent->shapes[0]);
 
       short *vx = shape->x;
       short *vy = shape->y;
@@ -759,6 +787,83 @@ int main(int num_args, char* args[]) {
   return 0;
 }
 
+Entity* createEntity(byte mode_type, byte color_ix) {
+  entities[len_entities].flags = WALL | mode_type;
+  entities[len_entities].shapes = (Shape*)calloc(64, sizeof(Shape)),
+  entities[len_entities].len_shapes++;
+  entities[len_entities].shapes[0].x = (short*)calloc(64, sizeof(short));
+  entities[len_entities].shapes[0].y = (short*)calloc(64, sizeof(short));
+  entities[len_entities].shapes[0].stroke_color_ix = color_ix;
+  entities[len_entities].shapes[0].fill_color_ix = NO_COLOR;
+  
+  len_entities++;
+
+  return &entities[len_entities - 1];
+}
+
+// delete by copying the tip entity over the one to remove
+void deleteEntity(int entity_ix) {
+  entities[entity_ix] = entities[len_entities - 1];
+  len_entities--;
+}
+
+void updateEntityBBox(Entity* ent) {
+  Shape* shape = &(ent->shapes[0]);
+
+  // update entity's bounding box by iterating vertices
+  short min_x = shape->x[0];
+  short max_x = shape->x[0];
+  short min_y = shape->y[0];
+  short max_y = shape->y[0];
+
+  for (int i = 1; i < shape->len_vertices; ++i) {
+    if (shape->x[i] < min_x)
+      min_x = shape->x[i];
+    else if (shape->x[i] > max_x)
+      max_x = shape->x[i];
+    if (shape->y[i] < min_y)
+      min_y = shape->y[i];
+    else if (shape->y[i] > max_y)
+      max_y = shape->y[i];
+  }
+
+  ent->x = min_x;
+  ent->y = min_y;
+  ent->w = max_x - min_x;
+  ent->h = max_y - min_y;
+}
+
+int indexOfEntity(short x, short y, short w, short h) {
+  // check if there's already a tile here
+  int existing_ent_ix = -1;
+  for (int i = 0; i < len_entities; ++i)
+    if (entities[i].x == x && entities[i].y == y && entities[i].h == h && entities[i].w == w)
+      existing_ent_ix = i;
+
+  return existing_ent_ix;
+}
+
+// adds 5 points (4 lines) to create a closed rectangle polygon
+void addRectPoints(Shape* shape, short x, short y, short w, short h) {
+  addPoint(shape, x, y);
+  addPoint(shape, x + w, y);
+  addPoint(shape, x + w, y + h);
+  addPoint(shape, x, y + h);
+  addPoint(shape, x, y);
+}
+
+void addPoint(Shape* shape, short x, short y) {
+  shape->x[shape->len_vertices] = x;
+  shape->y[shape->len_vertices] = y;
+  shape->len_vertices++;
+}
+
+// fills a shape w/ its stroke color & sets stroke color to none
+void fillShape(Shape* shape) {
+  shape->fill_color_ix = shape->stroke_color_ix;
+  shape->stroke_color_ix = NO_COLOR;
+}
+
 int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size) {
   int i;
   for (i = 0; str[i] != '\0'; ++i) {
@@ -810,12 +915,6 @@ int collides(int player_x, int player_y, Entity entities[], byte type) {
   return -1;
 }
 
-void error(char* activity) {
-  printf("%s failed: %s\n", activity, strerror(errno));//SDL_GetError());
-  SDL_Quit();
-  exit(-1);
-}
-
 int sign(float n) {
   if (n > 0)
     return 1;
@@ -823,4 +922,10 @@ int sign(float n) {
     return -1;
   else
     return 0;
+}
+
+void error(char* activity) {
+  printf("%s failed: %s\n", activity, strerror(errno));//SDL_GetError());
+  SDL_Quit();
+  exit(-1);
 }
