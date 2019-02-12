@@ -5,7 +5,6 @@
 #include <math.h>
 #include <limits.h>
 #include <errno.h>
-#include <sys/resource.h>
 
 #include "SDL.h"
 // #include "SDL_image.h"
@@ -140,16 +139,6 @@ short level_h;
 const int JOYSTICK_DEAD_ZONE = 8000;
 
 int main(int num_args, char* args[]) {
-  // increase the stack limit, since we currently allocate *everything* on the stack
-  struct rlimit rl;
-  int rlimit_rlt = getrlimit(RLIMIT_STACK, &rl);
-  if (rlimit_rlt > 0)
-    fprintf(stderr, "getrlimit returned error %d\n", rlimit_rlt);
-  rl.rlim_cur = 16 * 1024 * 1024; // 16 MiB min stack size
-  rlimit_rlt = setrlimit(RLIMIT_STACK, &rl);
-  if (rlimit_rlt > 0)
-    fprintf(stderr, "setrlimit returned error %d\n", rlimit_rlt);
-
   max_entities = 100;
   Entity entities[max_entities];
 
