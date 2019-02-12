@@ -448,7 +448,7 @@ int main(int num_args, char* args[]) {
           mouse_y = evt.button.y + vp.y;
           if (mouse_y < palette_y) {
             if (tile_mode) {
-              if (mouse_is_down) {
+              if (mouse_is_down && mode_type != ENEMY) {
                 short x = mouse_x - (mouse_x % grid_size);
                 short y = mouse_y - (mouse_y % grid_size);
                 
@@ -763,7 +763,7 @@ int main(int num_args, char* args[]) {
           while (!(collides(ent->x, ent->y + sign(ent->dy), ent->w, ent->h, i, entities, WALL) > -1))
             ent->y += sign(ent->dy);
           
-          ent->dy = -ent->dy;
+          ent->dy = -ent->dy / 8;
         }
         else {
           ent->y += ent->dy;
