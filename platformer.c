@@ -153,9 +153,6 @@ short level_h;
 const int JOYSTICK_DEAD_ZONE = 8000;
 
 int main(int num_args, char* args[]) {
-  max_entities = 100;
-  Entity entities[max_entities];
-
   time_t seed = 1529597895; //time(NULL);
   srand(seed);
   // printf("Seed: %lld\n", seed);
