@@ -204,14 +204,14 @@ extern "C" {
 
 	/* AA-Polygon */
 
-	SDL2_GFXPRIMITIVES_SCOPE int aapolygonColor(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color);
-	SDL2_GFXPRIMITIVES_SCOPE int aapolygonRGBA(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy,
+	SDL2_GFXPRIMITIVES_SCOPE int aapolygonColor(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color);
+	SDL2_GFXPRIMITIVES_SCOPE int aapolygonRGBA(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy,
 		int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
 
 	/* Filled Polygon */
 
-	SDL2_GFXPRIMITIVES_SCOPE int filledPolygonColor(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color);
-	SDL2_GFXPRIMITIVES_SCOPE int filledPolygonRGBA(SDL_Renderer * renderer, const Sint16 * vx,
+	SDL2_GFXPRIMITIVES_SCOPE int filledPolygonColor(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color);
+	SDL2_GFXPRIMITIVES_SCOPE int filledPolygonRGBA(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx,
 		const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a);
 
 	/* Textured Polygon */

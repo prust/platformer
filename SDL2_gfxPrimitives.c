@@ -2162,7 +2162,7 @@ int _pieRGBA(SDL_Renderer * renderer, Sint16 x, Sint16 y, Sint16 rad, Sint16 sta
 
 		/* Draw */
 		if (filled) {
-			result = filledPolygonRGBA(renderer, vx, vy, numpoints, r, g, b, a);
+			result = filledPolygonRGBA(renderer, 0, 0, vx, vy, numpoints, r, g, b, a);
 		} else {
 			result = polygonRGBA(renderer, vx, vy, numpoints, r, g, b, a);
 		}
@@ -2353,7 +2353,7 @@ int aatrigonColor(SDL_Renderer * renderer, Sint16 x1, Sint16 y1, Sint16 x2, Sint
 	vy[1]=y2;
 	vy[2]=y3;
 
-	return(aapolygonColor(renderer,vx,vy,3,color));
+	return(aapolygonColor(renderer,0,0,vx,vy,3,color));
 }
 
 /*!
@@ -2386,7 +2386,7 @@ int aatrigonRGBA(SDL_Renderer * renderer,  Sint16 x1, Sint16 y1, Sint16 x2, Sint
 	vy[1]=y2;
 	vy[2]=y3;
 
-	return(aapolygonRGBA(renderer,vx,vy,3,r,g,b,a));
+	return(aapolygonRGBA(renderer,0,0,vx,vy,3,r,g,b,a));
 }				   
 
 /* ------ Filled Trigon */
@@ -2419,7 +2419,7 @@ int filledTrigonColor(SDL_Renderer * renderer, Sint16 x1, Sint16 y1, Sint16 x2, 
 	vy[1]=y2;
 	vy[2]=y3;
 
-	return(filledPolygonColor(renderer,vx,vy,3,color));
+	return(filledPolygonColor(renderer,0,0,vx,vy,3,color));
 }
 
 /*!
@@ -2454,7 +2454,7 @@ int filledTrigonRGBA(SDL_Renderer * renderer, Sint16 x1, Sint16 y1, Sint16 x2, S
 	vy[1]=y2;
 	vy[2]=y3;
 
-	return(filledPolygonRGBA(renderer,vx,vy,3,r,g,b,a));
+	return(filledPolygonRGBA(renderer,0,0,vx,vy,3,r,g,b,a));
 }
 
 /* ---- Polygon */
@@ -2613,10 +2613,10 @@ int polygonRGBA(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, i
 
 \returns Returns 0 on success, -1 on failure.
 */
-int aapolygonColor(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color)
+int aapolygonColor(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color)
 {
 	Uint8 *c = (Uint8 *)&color; 
-	return aapolygonRGBA(renderer, vx, vy, n, c[0], c[1], c[2], c[3]);
+	return aapolygonRGBA(renderer, offset_x, offset_y, vx, vy, n, c[0], c[1], c[2], c[3]);
 }
 
 /*!
@@ -2633,7 +2633,7 @@ int aapolygonColor(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy
 
 \returns Returns 0 on success, -1 on failure.
 */
-int aapolygonRGBA(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+int aapolygonRGBA(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
 {
 	int result;
 	int i;
@@ -2669,14 +2669,14 @@ int aapolygonRGBA(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy,
 	*/
 	result = 0;
 	for (i = 1; i < n; i++) {
-		result |= _aalineRGBA(renderer, *x1, *y1, *x2, *y2, r, g, b, a, 0);
+		result |= _aalineRGBA(renderer, *x1 + offset_x, *y1 + offset_y, *x2 + offset_x, *y2 + offset_y, r, g, b, a, 0);
 		x1 = x2;
 		y1 = y2;
 		x2++;
 		y2++;
 	}
 
-	result |= _aalineRGBA(renderer, *x1, *y1, *vx, *vy, r, g, b, a, 0);
+	result |= _aalineRGBA(renderer, *x1 + offset_x, *y1 + offset_y, *vx + offset_x, *vy + offset_y, r, g, b, a, 0);
 
 	return (result);
 }
@@ -2728,7 +2728,7 @@ Note: The last two parameters are optional; but are required for multithreaded o
 
 \returns Returns 0 on success, -1 on failure.
 */
-int filledPolygonRGBAMT(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int **polyInts, int *polyAllocated)
+int filledPolygonRGBAMT(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a, int **polyInts, int *polyAllocated)
 {
 	int result;
 	int i;
@@ -2878,7 +2878,7 @@ int filledPolygonRGBAMT(SDL_Renderer * renderer, const Sint16 * vx, const Sint16
 			xa = (xa >> 16) + ((xa & 32768) >> 15);
 			xb = gfxPrimitivesPolyInts[i+1] - 1;
 			xb = (xb >> 16) + ((xb & 32768) >> 15);
-			result |= hline(renderer, xa, xb, y);
+			result |= hline(renderer, xa + offset_x, xb + offset_x, y + offset_y);
 		}
 	}
 
@@ -2896,10 +2896,10 @@ int filledPolygonRGBAMT(SDL_Renderer * renderer, const Sint16 * vx, const Sint16
 
 \returns Returns 0 on success, -1 on failure.
 */
-int filledPolygonColor(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color)
+int filledPolygonColor(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy, int n, Uint32 color)
 {
 	Uint8 *c = (Uint8 *)&color; 
-	return filledPolygonRGBAMT(renderer, vx, vy, n, c[0], c[1], c[2], c[3], NULL, NULL);
+	return filledPolygonRGBAMT(renderer, offset_x, offset_y, vx, vy, n, c[0], c[1], c[2], c[3], NULL, NULL);
 }
 
 /*!
@@ -2916,9 +2916,9 @@ int filledPolygonColor(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 
 
 \returns Returns 0 on success, -1 on failure.
 */
-int filledPolygonRGBA(SDL_Renderer * renderer, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+int filledPolygonRGBA(SDL_Renderer * renderer, Sint16 offset_x, Sint16 offset_y, const Sint16 * vx, const Sint16 * vy, int n, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
 {
-	return filledPolygonRGBAMT(renderer, vx, vy, n, r, g, b, a, NULL, NULL);
+	return filledPolygonRGBAMT(renderer, offset_x, offset_y, vx, vy, n, r, g, b, a, NULL, NULL);
 }
 
 /* ---- Textured Polygon */
@@ -3806,5 +3806,5 @@ int thickLineRGBA(SDL_Renderer *renderer, Sint16 x1, Sint16 y1, Sint16 x2, Sint1
 	py[3] = (Sint16)(dy2 - nx);
 
 	/* Draw polygon */
-	return filledPolygonRGBA(renderer, px, py, 4, r, g, b, a);
+	return filledPolygonRGBA(renderer, 0, 0, px, py, 4, r, g, b, a);
 }
