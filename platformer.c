@@ -111,6 +111,7 @@ void addRectPoints(Shape* shape, short x, short y, short w, short h);
 void addPoint(Shape* shape, short x, short y);
 void fillShape(Shape* shape);
 int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, int size);
+int will_collide(Entity* ent, byte type);
 int collides(int x, int y, int w, int h, int ix, Entity entities[], byte type);
 int sign(float n);
 void error(char* activity);
@@ -128,18 +129,11 @@ FILE *level_file;
 
 // adapted from https://www.reddit.com/r/gamemaker/comments/37y24e/perfect_platformer_code/
 float start_grav = 0.2;
-float grav = 0.2;
-float dx = 0;
-float dy = 0;
 int jump_speed = 4;
 int move_speed = 2;
 
 int start_x = 0;
-int player_x = 0;
 int start_y = 0;
-int player_y = 0;
-int player_w = 10;
-int player_h = 10;
 
 bool left_pressed = false;
 bool right_pressed = false;
@@ -156,6 +150,23 @@ int main(int num_args, char* args[]) {
   time_t seed = 1529597895; //time(NULL);
   srand(seed);
   // printf("Seed: %lld\n", seed);
+
+  Entity player = {
+    .flags = 0,
+    .health = 1,
+    .x = 0,
+    .y = 0,
+    .w = 10,
+    .h = 10,
+    .dx = 0,
+    .dy = 0,
+    .grav_x = 0,
+    .grav_y = 0.2,
+    // since we're not rendering players generically yet, we don't need to set shapes
+    .len_shapes = 0,
+    .max_shapes = 0,
+    .shapes = NULL
+  };
   
   // SDL setup
   SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -256,13 +267,17 @@ int main(int num_args, char* args[]) {
     error("setting blend mode");
 
   // setup controllers (& controller joysticks)
+  bool has_controller = false;
   int max_controllers = SDL_NumJoysticks();
   SDL_GameController* controllers[max_controllers];
   for (int i = 0; i < max_controllers; ++i) {
-    if (SDL_IsGameController(i))
+    if (SDL_IsGameController(i)) {
       controllers[i] = SDL_GameControllerOpen(i); // need to do this in order to receive events
-    else
+      has_controller = true;
+    }
+    else {
       controllers[i] = NULL;
+    }
   }
 
   SDL_Event evt;
@@ -292,10 +307,10 @@ int main(int num_args, char* args[]) {
 
   while (!exit_game) {
     // reset left/right every time when not using a controller
-    // if (controller == NULL) {
-      // left_pressed = false;
-      // right_pressed = false;
-    // }
+    if (!has_controller) {
+      left_pressed = false;
+      right_pressed = false;
+    }
     up_pressed = false;
     down_pressed = false;
     bool was_paused = is_paused;
@@ -531,11 +546,6 @@ int main(int num_args, char* args[]) {
               selected_shape = NULL;
             }
           }
-          // gravity-switching
-          // not working yet -- reverse gravity prevents left/right movement
-          // i think due to the platforming code
-          // also, the "jump" mechanic needs to reversed when in reverse gravity
-
           else if (evt.key.keysym.sym == SDLK_g) {
             mode_type = REVERSE_GRAV;
           }
@@ -576,12 +586,11 @@ int main(int num_args, char* args[]) {
           break;
 
         case SDL_CONTROLLERBUTTONDOWN:
-        case SDL_CONTROLLERBUTTONUP:
           if (evt.cbutton.button == SDL_CONTROLLER_BUTTON_A) {
-            if (grav > 0.0) {
+            if (player.grav_y > 0.0) {
               up_pressed = true;
             }
-            else if (grav < 0.0) {
+            else if (player.grav_y < 0.0) {
               down_pressed = true;
             }
           }
@@ -627,15 +636,15 @@ int main(int num_args, char* args[]) {
 
     // left/right movement
     if (left_pressed)
-      dx = -move_speed;
+      player.dx = -move_speed;
     else if (right_pressed)
-      dx = move_speed;
+      player.dx = move_speed;
     else
-      dx = 0;
+      player.dx = 0;
     
     // gravity
-    if ((grav > 0 && dy < 10) || (grav < 0 && dy > -10))
-      dy += grav;
+    if ((player.grav_y > 0 && player.dy < 10) || (player.grav_y < 0 && player.dy > -10))
+      player.dy += player.grav_y;
 
     for (int i = 0; i < len_entities; ++i) {
       Entity* ent = &(entities[i]);
@@ -643,67 +652,66 @@ int main(int num_args, char* args[]) {
         ent->dy += ent->grav_y;
     }
 
-    if (collides(player_x + dx, player_y + dy, player_w, player_h, -1, entities, REVERSE_GRAV) > -1)
-      grav = -grav;
+    if (will_collide(&player, REVERSE_GRAV) > -1)
+      player.grav_y = -player.grav_y;
 
-    if (collides(player_x + dx, player_y + dy, player_w, player_h, -1, entities, FINISH) > -1)
+    if (will_collide(&player, FINISH) > -1)
       won_game = true;
 
-    if (collides(player_x + dx, player_y + dy, player_w, player_h, -1, entities, CHECKPOINT) > -1) {
-      start_x = player_x;
-      start_y = player_y;
-      start_grav = grav;
+    if (will_collide(&player, CHECKPOINT) > -1) {
+      start_x = player.x;
+      start_y = player.y;
+      start_grav = player.grav_y;
     }
 
-    int portal_ix = collides(player_x + dx, player_y + dy, player_w, player_h, -1, entities, PORTAL);
+    int portal_ix = will_collide(&player, PORTAL);
     if (portal_ix > -1) {
       for (int i = 0; i < len_entities; ++i) {
         if (i != portal_ix && entities[i].flags & PORTAL) {
           int delta_x = entities[i].x - entities[portal_ix].x;
           int delta_y = entities[i].y - entities[portal_ix].y;
-          player_x += delta_x;
-          player_y += delta_y;
-          dx = -dx;
-          dy = -dy;
+          player.x += delta_x;
+          player.y += delta_y;
+          player.dx = -player.dx;
+          player.dy = -player.dy;
           break;
         }
       }
     }
 
     // start over if you hit lava or an enemy or fall offscreen
-    if ((collides(player_x + dx, player_y + dy, player_w, player_h, -1, entities, LAVA) > -1) ||
-      (collides(player_x + dx, player_y + dy, player_w, player_h, -1, entities, ENEMY) > -1) ||
-      player_x < 0 || player_x > vp.w || player_y < 0 || player_y > vp.h) {
-      grav = start_grav;
-      dx = 0;
-      dy = 0;
-      player_x = start_x;
-      player_y = start_y;
+    if ((will_collide(&player, LAVA) > -1) || (will_collide(&player, ENEMY) > -1) ||
+      player.x < 0 || player.x > vp.w || player.y < 0 || player.y > vp.h) {
+      player.grav_y = start_grav;
+      player.dx = 0;
+      player.dy = 0;
+      player.x = start_x;
+      player.y = start_y;
     }
 
     // if touching ground, & jump button pressed, jump
-    if (up_pressed && collides(player_x, player_y + 1, player_w, player_h, -1, entities, WALL) > -1)
-      dy = -jump_speed;
-    else if (down_pressed && collides(player_x, player_y - 1, player_w, player_h, -1, entities, WALL) > -1)
-      dy = jump_speed;
+    if (up_pressed && collides(player.x, player.y + 1, player.w, player.h, -1, entities, WALL) > -1)
+      player.dy = -jump_speed;
+    else if (down_pressed && collides(player.x, player.y - 1, player.w, player.h, -1, entities, WALL) > -1)
+      player.dy = jump_speed;
 
     // if it's going to collide (horiz), inch there 1px at a time
-    if (collides(player_x + dx, player_y, player_w, player_h, -1, entities, WALL) > -1 && dx) {
-      while (!(collides(player_x + sign(dx), player_y, player_w, player_h, -1, entities, WALL) > -1))
-        player_x += sign(dx);
+    if (collides(player.x + player.dx, player.y, player.w, player.h, -1, entities, WALL) > -1 && player.dx) {
+      while (!(collides(player.x + sign(player.dx), player.y, player.w, player.h, -1, entities, WALL) > -1))
+        player.x += sign(player.dx);
       
-      dx = 0;
+      player.dx = 0;
     }
-    player_x += dx;
+    player.x += player.dx;
 
     // if it's going to collid (vert), inch there 1px at a time
-    if (collides(player_x, player_y + dy, player_w, player_h, -1, entities, WALL) > -1 && dy) {
-      while (!(collides(player_x, player_y + sign(dy), player_w, player_h, -1, entities, WALL) > -1))
-        player_y += sign(dy);
+    if (collides(player.x, player.y + player.dy, player.w, player.h, -1, entities, WALL) > -1 && player.dy) {
+      while (!(collides(player.x, player.y + sign(player.dy), player.w, player.h, -1, entities, WALL) > -1))
+        player.y += sign(player.dy);
       
-      dy = 0;
+      player.dy = 0;
     }
-    player_y += dy;
+    player.y += player.dy;
 
     // if an enemy is going to collide, inch there & *reverse* the direction
     for (int i = 0; i < len_entities; ++i) {
@@ -762,16 +770,8 @@ int main(int num_args, char* args[]) {
         filledPolygonColor(renderer, ent->x, ent->y, vx, vy, shape->len_vertices, colors[shape->fill_color_ix]);// 0xFF000000);
       }
       else {
-        for (int j = 0; j < shape->len_vertices - 1; ++j) {
+        for (int j = 0; j < shape->len_vertices - 1; ++j)
           aalineColor(renderer, vx[j] + ent->x, vy[j] + ent->y, vx[j + 1] + ent->x, vy[j + 1] + ent->y, colors[shape->stroke_color_ix]);
-
-          // thickLineColor(renderer, vx[j], vy[j], vx[j + 1], vy[j + 1], 2, colors[shape->color_ix]);
-          
-          // I tried another AA line, 1px shifted in both dimensions, to make line thicker
-          // but that produced weird artifacts/optical illusions
-          // best to do non-AA lines w/ AA lines on both sides to smooth?
-          // or, probably best to just implement an aathickLineColor() function
-        }
       }
     }
 
@@ -784,10 +784,10 @@ int main(int num_args, char* args[]) {
       error("setting player color");
 
     SDL_Rect player_rect = {
-      .x = player_x - vp.x,
-      .y = player_y - vp.y,
-      .w = player_w,
-      .h = player_h
+      .x = player.x - vp.x,
+      .y = player.y - vp.y,
+      .w = player.w,
+      .h = player.h
     };
     if (SDL_RenderFillRect(renderer, &player_rect) < 0)
       error("filling player rect");
@@ -954,6 +954,10 @@ int render_text(SDL_Renderer* renderer, char str[], int offset_x, int offset_y, 
 
   // width of total text string
   return i * size * 8;
+}
+
+int will_collide(Entity* ent, byte type) {
+  return collides(ent->x + ent->dx, ent->y + ent->dy, ent->w, ent->h, -1, entities, type);
 }
 
 int collides(int x, int y, int w, int h, int ix, Entity entities[], byte type) {
