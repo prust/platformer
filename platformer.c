@@ -849,6 +849,7 @@ void deleteEntity(int entity_ix) {
   free(ent->shapes);
 
   entities[entity_ix] = entities[len_entities - 1];
+  memset(&entities[len_entities - 1], 0, sizeof(Entity));
   len_entities--;
 }
 
