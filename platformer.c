@@ -182,33 +182,14 @@ int main(int num_args, char* args[]) {
     level_h = vp.h;
     
     // create a default ground entity/shape
-    len_entities++;
-    Entity ground = {
-      .flags = WALL,
-      .x = 0,
-      .y = vp.h - (vp.h % grid_size) - grid_size,
-      .w = vp.w,
-      .h = grid_size,
-      .shapes = (Shape*)calloc(64, sizeof(Shape)),
-    };
-    entities[0] = ground;
-    entities[0].len_shapes++;
-    
-    Shape ground_shape = {
-      .x = (short*)calloc(64, sizeof(short)),
-      .y = (short*)calloc(64, sizeof(short)),
-      .len_vertices = 4,
-      .max_vertices = 64,
-      .fill_color_ix = 6,
-      .stroke_color_ix = NO_COLOR
-    };
-    ground_shape.x[0] = 0, ground_shape.y[0] = 0;
-    ground_shape.x[1] = 0, ground_shape.y[1] = grid_size; 
-    ground_shape.x[2] = vp.w, ground_shape.y[2] = grid_size;
-    ground_shape.x[3] = vp.w, ground_shape.y[3] = 0;
-    entities[0].shapes[0] = ground_shape;
+    Entity* ground_ent = createEntity(WALL, 6, 0, vp.h - (vp.h % grid_size) - grid_size, vp.w, grid_size);
+    Shape* ground_shape = &(ground_ent->shapes[0]);
+    fillShape(ground_shape);
+    addRectPoints(ground_shape, 0, 0, vp.w, grid_size);
   }
   else {
+    // Load level from file (deserialize)
+
     // seek to the end to find the size
     if (fseek(level_file, 0, SEEK_END)) {
       fclose(level_file);
@@ -223,7 +204,7 @@ int main(int num_args, char* args[]) {
     }
 
     void* buffer = calloc(1, num_bytes);
-    fread(buffer, num_bytes, 1, level_file); // read bytes to our buffer
+    fread(buffer, num_bytes, 1, level_file); // read bytes into our buffer
     if (ferror(level_file))
       printf("reading level file: %s\n", strerror(errno));
     
@@ -274,22 +255,14 @@ int main(int num_args, char* args[]) {
   if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
     error("setting blend mode");
 
-  int MAX_CONTROLLERS = 4;
-  SDL_GameController *ControllerHandles[MAX_CONTROLLERS];
-  for (int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS; ++ControllerIndex)
-    ControllerHandles[ControllerIndex] = NULL;
-
-  int MaxJoysticks = SDL_NumJoysticks();
-  int ControllerIndex = 0;
-  for(int JoystickIndex=0; JoystickIndex < MaxJoysticks; ++JoystickIndex) {
-    if (!SDL_IsGameController(JoystickIndex))
-      continue;
-    
-    if (ControllerIndex >= MAX_CONTROLLERS)
-      break;
-    
-    ControllerHandles[ControllerIndex] = SDL_GameControllerOpen(JoystickIndex);
-    ControllerIndex++;
+  // setup controllers (& controller joysticks)
+  int max_controllers = SDL_NumJoysticks();
+  SDL_GameController* controllers[max_controllers];
+  for (int i = 0; i < max_controllers; ++i) {
+    if (SDL_IsGameController(i))
+      controllers[i] = SDL_GameControllerOpen(i); // need to do this in order to receive events
+    else
+      controllers[i] = NULL;
   }
 
   SDL_Event evt;
@@ -834,9 +807,9 @@ int main(int num_args, char* args[]) {
     free(ent->shapes);
   }
 
-  for (int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS; ++ControllerIndex)
-    if (ControllerHandles[ControllerIndex])
-      SDL_GameControllerClose(ControllerHandles[ControllerIndex]);
+  for (int i = 0; i < max_controllers; ++i)
+    if (controllers[i])
+      SDL_GameControllerClose(controllers[i]);
 
   if (SDL_SetWindowFullscreen(window, 0) < 0)
     error("exiting fullscreen");
